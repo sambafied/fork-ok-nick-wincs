@@ -1,21 +1,12 @@
-use std::{path::PathBuf, slice};
+use std::{ffi::OsString, path::PathBuf, slice};
 
-use widestring::{U16CStr, U16CString};
+use widestring::{u16cstr, U16CStr};
 use windows::Win32::Storage::CloudFilters::{CF_CALLBACK_INFO, CF_PROCESS_INFO};
-
-use crate::placeholder::Placeholder;
 
 pub type RawConnectionKey = i64;
 pub type RawTransferKey = i64;
 
-/// A struct containing various information for the current file operation.
-///
-/// If there is no activity on the placeholder (the methods in the
-/// [Placeholder][crate::Placeholder] struct returned by
-/// [Request::placeholder][crate::Request::placeholder]) within 60 seconds, the operating system
-/// will automatically invalidate the request. To prevent this, read
-/// [Request::reset_timeout][crate::Request::reset_timeout].
-#[derive(Debug)]
+/// A struct containing standard information for the current file operation.
 pub struct Request(CF_CALLBACK_INFO);
 
 impl Request {
@@ -23,28 +14,18 @@ impl Request {
         Self(info)
     }
 
-    /// A raw connection key used to identify the connection.
-    pub fn connection_key(&self) -> RawConnectionKey {
-        self.0.ConnectionKey.0
-    }
-
-    /// A raw transfer key used to identify the current file operation.
-    pub fn transfer_key(&self) -> RawTransferKey {
-        self.0.TransferKey
-    }
-
     /// The GUID path of the current volume.
     ///
     /// The returned value comes in the form `\?\Volume{GUID}`.
-    pub fn volume_guid_path(&self) -> &U16CStr {
-        unsafe { U16CStr::from_ptr_str(self.0.VolumeGuidName.0) }
+    pub fn volume_guid_path(&self) -> OsString {
+        unsafe { U16CStr::from_ptr_str(self.0.VolumeGuidName.0) }.to_os_string()
     }
 
     /// The letter of the current volume.
     ///
     /// The returned value comes in the form `X:`, where `X` is the drive letter.
-    pub fn volume_letter(&self) -> &U16CStr {
-        unsafe { U16CStr::from_ptr_str(self.0.VolumeDosName.0) }
+    pub fn volume_letter(&self) -> OsString {
+        unsafe { U16CStr::from_ptr_str(self.0.VolumeDosName.0) }.to_os_string()
     }
 
     /// The serial number of the current volume.
@@ -75,7 +56,6 @@ impl Request {
         self.0.FileSize as u64
     }
 
-    // TODO: Create a U16Path struct to avoid an extra allocation
     // For now this should be cached on creation
     /// The absolute path of the placeholder file/directory starting from the root directory of the
     /// volume.
@@ -105,7 +85,6 @@ impl Request {
     //     self.0.RequestKey
     // }
 
-    // TODO: move file blob and file-related stuff to the placeholder struct?
     /// The byte slice assigned to the current placeholder file/directory.
     pub fn file_blob(&self) -> &[u8] {
         unsafe {
@@ -126,36 +105,50 @@ impl Request {
         }
     }
 
-    /// Creates a new [Placeholder][crate::Placeholder] struct to perform various operations on the
-    /// current placeholder file/directory.
-    pub fn placeholder(&self) -> Placeholder {
-        Placeholder::new(
-            self.connection_key(),
-            self.transfer_key(),
-            self.path(),
-            self.file_size(),
-        )
+    // // https://docs.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_callback_type#remarks
+    // // after 60 seconds of no report, windows will cancel the request with an error,
+    // // this function is a "hack" to avoid the timeout
+    // // https://docs.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfexecute#remarks
+    // // CfExecute will reset any timers as stated
+    // /// By default, the operating system will invalidate the callback after 60 seconds of no
+    // /// activity (meaning, no placeholder methods are invoked). If you are prone to this issue,
+    // /// consider calling this method or call placeholder methods more frequently.
+    // pub fn reset_timeout() {}
+
+    /// A raw connection key used to identify the connection.
+    pub(crate) fn connection_key(&self) -> RawConnectionKey {
+        self.0.ConnectionKey.0
     }
 
-    // https://docs.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_callback_type#remarks
-    // after 60 seconds of no report, windows will cancel the request with an error,
-    // this function is a "hack" to avoid the timeout
-    // https://docs.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfexecute#remarks
-    // CfExecute will reset any timers as stated
-    /// By default, the operating system will invalidate the callback after 60 seconds of no
-    /// activity (meaning, no placeholder methods are invoked). If you are prone to this issue,
-    /// consider calling this method or call placeholder methods more frequently.
-    pub fn reset_timeout() {}
+    /// A raw transfer key used to identify the current file operation.
+    pub(crate) fn transfer_key(&self) -> RawTransferKey {
+        self.0.TransferKey
+    }
+}
+
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            .field("volume_guid_path", &self.volume_guid_path())
+            .field("volume_letter", &self.volume_letter())
+            .field("volume_serial_number", &self.volume_serial_number())
+            .field("process", &self.process())
+            .field("sync_root_file_id", &self.sync_root_file_id())
+            .field("file_id", &self.file_id())
+            .field("file_size", &self.file_size())
+            .field("path", &self.path())
+            .field("priority_hint", &self.priority_hint())
+            .finish()
+    }
 }
 
 /// Information about the calling process.
-#[derive(Debug)]
 pub struct Process(CF_PROCESS_INFO);
 
 impl Process {
     /// The application's package name.
-    pub fn name(&self) -> &U16CStr {
-        unsafe { U16CStr::from_ptr_str(self.0.PackageName.0) }
+    pub fn name(&self) -> OsString {
+        unsafe { U16CStr::from_ptr_str(self.0.PackageName.0) }.to_os_string()
     }
 
     /// The ID of the user process.
@@ -164,20 +157,27 @@ impl Process {
     }
 
     /// The ID of the session where the user process resides.
+    ///
+    /// ## Note
+    ///
+    /// [Process::session_id] is valid in versions 1803 and later.
     pub fn session_id(&self) -> u32 {
         self.0.SessionId
     }
 
     /// The application's ID.
-    pub fn application_id(&self) -> &U16CStr {
-        unsafe { U16CStr::from_ptr_str(self.0.ApplicationId.0) }
+    pub fn application_id(&self) -> OsString {
+        unsafe { U16CStr::from_ptr_str(self.0.ApplicationId.0) }.to_os_string()
     }
 
-    // TODO: command_line and session_id are valid only in versions 1803+
-    // https://docs.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_process_infoessionid
     /// The exact command used to initialize the user process.
-    pub fn command_line(&self) -> &U16CStr {
-        unsafe { U16CStr::from_ptr_str(self.0.CommandLine.0) }
+    ///
+    /// ## Note
+    ///
+    /// [Process::command_line] is valid in versions 1803 and later.
+    pub fn command_line(&self) -> Option<OsString> {
+        let cmd = unsafe { U16CStr::from_ptr_str(self.0.ImagePath.0) };
+        (cmd != u16cstr!("UNKNOWN")).then(|| cmd.to_os_string())
     }
 
     // TODO: Could be optimized
@@ -186,11 +186,20 @@ impl Process {
     /// This function returns [None][std::option::Option::None] when the operating system failed to
     /// retrieve the path.
     pub fn path(&self) -> Option<PathBuf> {
-        let path = unsafe { U16CString::from_ptr_str(self.0.ImagePath.0) };
-        if path == unsafe { U16CString::from_str_unchecked("UNKNOWN") } {
-            None
-        } else {
-            Some(path.to_os_string().into())
-        }
+        let path = unsafe { U16CStr::from_ptr_str(self.0.ImagePath.0) };
+        (path != u16cstr!("UNKNOWN")).then(|| PathBuf::from(path.to_os_string()))
+    }
+}
+
+impl std::fmt::Debug for Process {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Process")
+            .field("name", &self.name())
+            .field("id", &self.id())
+            .field("session_id", &self.session_id())
+            .field("application_id", &self.application_id())
+            .field("command_line", &self.command_line())
+            .field("path", &self.path())
+            .finish()
     }
 }

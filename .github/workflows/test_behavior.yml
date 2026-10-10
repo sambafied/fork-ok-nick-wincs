@@ -1,0 +1,17 @@
+name: test behavior
+
+# Local validation is the Sambafied default; hosted runs are explicit only.
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo test
+        env:
+          SAMBAFIED_RUN_CLOUD_FILTER_TESTS: "1"
+        run: cargo test --test behavior --all-features
