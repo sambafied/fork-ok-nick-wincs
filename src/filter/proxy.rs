@@ -7,8 +7,8 @@ use windows::Win32::Storage::CloudFilters::{
 };
 
 use crate::{
-    filter::{info, ticket, SyncFilter},
-    request::Request,
+    command::{self, Fallible},
+    filter::{info, ticket, Request, SyncFilter},
 };
 
 pub type Callbacks = [CF_CALLBACK_REGISTRATION; 14];
@@ -82,13 +82,21 @@ pub unsafe extern "system" fn fetch_data<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let ticket = ticket::FetchData::new(request.connection_key(), request.transfer_key());
+        let connection_key = request.connection_key();
+        let transfer_key = request.transfer_key();
+        let ticket = ticket::FetchData::new(connection_key, transfer_key);
 
-        filter.fetch_data(
+        let Err(e) = filter.fetch_data(
             request,
             ticket,
             info::FetchData((*params).Anonymous.FetchData),
-        );
+        ) else {
+            return;
+        };
+
+        if let Err(error) = command::Write::fail(connection_key, transfer_key, e) {
+            log::error!("Cannot report callback failure: {error}");
+        }
     }
 }
 
@@ -98,13 +106,21 @@ pub unsafe extern "system" fn validate_data<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let ticket = ticket::ValidateData::new(request.connection_key(), request.transfer_key());
+        let connection_key = request.connection_key();
+        let transfer_key = request.transfer_key();
+        let ticket = ticket::ValidateData::new(connection_key, transfer_key);
 
-        filter.validate_data(
+        let Err(e) = filter.validate_data(
             request,
             ticket,
             info::ValidateData((*params).Anonymous.ValidateData),
-        );
+        ) else {
+            return;
+        };
+
+        if let Err(error) = command::Validate::fail(connection_key, transfer_key, e) {
+            log::error!("Cannot report callback failure: {error}");
+        }
     }
 }
 
@@ -126,14 +142,21 @@ pub unsafe extern "system" fn fetch_placeholders<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let ticket =
-            ticket::FetchPlaceholders::new(request.connection_key(), request.transfer_key());
+        let connection_key = request.connection_key();
+        let transfer_key = request.transfer_key();
+        let ticket = ticket::FetchPlaceholders::new(connection_key, transfer_key);
 
-        filter.fetch_placeholders(
+        let Err(e) = filter.fetch_placeholders(
             request,
             ticket,
             info::FetchPlaceholders((*params).Anonymous.FetchPlaceholders),
-        );
+        ) else {
+            return;
+        };
+
+        if let Err(error) = command::CreatePlaceholders::fail(connection_key, transfer_key, e) {
+            log::error!("Cannot report callback failure: {error}");
+        }
     }
 }
 
@@ -179,13 +202,21 @@ pub unsafe extern "system" fn notify_dehydrate<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let ticket = ticket::Dehydrate::new(request.connection_key(), request.transfer_key());
+        let connection_key = request.connection_key();
+        let transfer_key = request.transfer_key();
+        let ticket = ticket::Dehydrate::new(connection_key, transfer_key);
 
-        filter.dehydrate(
+        let Err(e) = filter.dehydrate(
             request,
             ticket,
             info::Dehydrate((*params).Anonymous.Dehydrate),
-        );
+        ) else {
+            return;
+        };
+
+        if let Err(error) = command::Dehydrate::fail(connection_key, transfer_key, e) {
+            log::error!("Cannot report callback failure: {error}");
+        }
     }
 }
 
@@ -207,9 +238,18 @@ pub unsafe extern "system" fn notify_delete<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let ticket = ticket::Delete::new(request.connection_key(), request.transfer_key());
+        let connection_key = request.connection_key();
+        let transfer_key = request.transfer_key();
+        let ticket = ticket::Delete::new(connection_key, transfer_key);
 
-        filter.delete(request, ticket, info::Delete((*params).Anonymous.Delete));
+        let Err(e) = filter.delete(request, ticket, info::Delete((*params).Anonymous.Delete))
+        else {
+            return;
+        };
+
+        if let Err(error) = command::Delete::fail(connection_key, transfer_key, e) {
+            log::error!("Cannot report callback failure: {error}");
+        }
     }
 }
 
@@ -231,9 +271,18 @@ pub unsafe extern "system" fn notify_rename<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let ticket = ticket::Rename::new(request.connection_key(), request.transfer_key());
+        let connection_key = request.connection_key();
+        let transfer_key = request.transfer_key();
+        let ticket = ticket::Rename::new(connection_key, transfer_key);
+        let info = info::Rename((*params).Anonymous.Rename, request.volume_letter());
 
-        filter.rename(request, ticket, info::Rename((*params).Anonymous.Rename));
+        let Err(e) = filter.rename(request, ticket, info) else {
+            return;
+        };
+
+        if let Err(error) = command::Rename::fail(connection_key, transfer_key, e) {
+            log::error!("Cannot report callback failure: {error}");
+        }
     }
 }
 
@@ -242,35 +291,49 @@ pub unsafe extern "system" fn notify_rename_completion<T: SyncFilter + 'static>(
     params: *const CF_CALLBACK_PARAMETERS,
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
-        filter.renamed(
-            Request::new(*info),
-            info::Renamed((*params).Anonymous.RenameCompletion),
+        let request = Request::new(*info);
+        let info = info::Renamed(
+            (*params).Anonymous.RenameCompletion,
+            request.volume_letter(),
         );
+        filter.renamed(request, info);
     }
 }
 
 unsafe fn filter_from_info<T: SyncFilter + 'static>(
     info: *const CF_CALLBACK_INFO,
 ) -> Option<Arc<T>> {
-    // get the original weak arc
-    let weak = Weak::from_raw((*info).CallbackContext as *mut T);
-    // attempt to upgrade it to a strong arc
-    match weak.upgrade() {
-        // if the memory exists then the filter hasn't been disconnected
-        Some(strong) => {
-            // forget the original weak arc for next use
-            let _ = Weak::into_raw(weak);
-            // return the strong arc
-            Some(strong)
+    // The immutable Box<Weak<T>> is owned by Connection. Successful disconnect
+    // ends platform callbacks before it is freed. Each callback only borrows it.
+    let context = ((*info).CallbackContext as *const Weak<T>).as_ref()?;
+    context.upgrade()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::{CResult, CloudErrorKind};
+    struct EmptyFilter;
+    impl SyncFilter for EmptyFilter {
+        fn fetch_data(&self, _: Request, _: ticket::FetchData, _: info::FetchData) -> CResult<()> {
+            Err(CloudErrorKind::NotSupported)
         }
-        // if the memory is freed then the filter is disconnected
-        None => {
-            // TODO: the weak arc should be freed on disconnect making this scenario
-            // relatively impossible. Although, if I free the weak arc and by some chance
-            // a callback is called, then it could be reading memory from a dangling pointer.
-            // I could either introduce some mega hack to free the memory after x seconds or
-            // suffer from a few bytes of memory leak..
-            None
+    }
+    #[test]
+    fn callback_context_borrows_without_consuming_weak_ownership() {
+        let filter = Arc::new(EmptyFilter);
+        let context = Box::new(Arc::downgrade(&filter));
+        let info = CF_CALLBACK_INFO {
+            CallbackContext: context.as_ref() as *const Weak<EmptyFilter> as *mut _,
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            assert!(unsafe { filter_from_info::<EmptyFilter>(&info) }.is_some());
+        }
+        assert_eq!(Arc::weak_count(&filter), 1);
+        drop(filter);
+        for _ in 0..3 {
+            assert!(unsafe { filter_from_info::<EmptyFilter>(&info) }.is_none());
         }
     }
 }

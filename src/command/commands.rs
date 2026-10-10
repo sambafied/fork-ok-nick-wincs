@@ -1,4 +1,4 @@
-use std::{ops::Range, ptr, slice};
+use std::{ops::Range, ptr};
 
 use windows::{
     core,
@@ -16,9 +16,9 @@ use windows::{
 use crate::{
     command::executor::{execute, Command, Fallible},
     error::CloudErrorKind,
-    placeholder_file::{Metadata, PlaceholderFile},
-    request::{RawConnectionKey, RawTransferKey},
-    usn::Usn,
+    filter::{RawConnectionKey, RawTransferKey},
+    metadata::Metadata,
+    placeholder_file::PlaceholderFile,
 };
 
 /// Read data from a placeholder file.
@@ -110,13 +110,14 @@ impl Fallible for Write<'_> {
 
 /// Update various properties on a placeholder.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Update<'a> {
     /// Whether or not to mark the placeholder as "synced."
-    pub mark_sync: bool,
+    pub mark_in_sync: bool,
     /// Optional metadata to update.
     pub metadata: Option<Metadata>,
     /// Optional file blob to update.
-    pub blob: Option<&'a [u8]>,
+    pub blob: &'a [u8],
 }
 
 impl Command for Update<'_> {
@@ -130,18 +131,20 @@ impl Command for Update<'_> {
     fn build(&self) -> CF_OPERATION_PARAMETERS_0 {
         CF_OPERATION_PARAMETERS_0 {
             RestartHydration: CF_OPERATION_PARAMETERS_0_3 {
-                Flags: if self.mark_sync {
+                Flags: if self.mark_in_sync {
                     CloudFilters::CF_OPERATION_RESTART_HYDRATION_FLAG_MARK_IN_SYNC
                 } else {
                     CloudFilters::CF_OPERATION_RESTART_HYDRATION_FLAG_NONE
                 },
-                FsMetadata: self.metadata.map_or(ptr::null_mut(), |mut metadata| {
-                    &mut metadata as *mut _ as *mut _
-                }),
-                FileIdentity: self
-                    .blob
-                    .map_or(ptr::null_mut(), |blob| blob.as_ptr() as *mut _),
-                FileIdentityLength: self.blob.map_or(0, |blob| blob.len() as u32),
+                FsMetadata: self
+                    .metadata
+                    .as_ref()
+                    .map_or(ptr::null(), |metadata| &metadata.0 as *const _),
+                FileIdentity: match self.blob.is_empty() {
+                    true => ptr::null(),
+                    false => self.blob.as_ptr() as *const _,
+                },
+                FileIdentityLength: self.blob.len() as _,
             },
         }
     }
@@ -159,29 +162,10 @@ pub struct CreatePlaceholders<'a> {
 impl Command for CreatePlaceholders<'_> {
     const OPERATION: CF_OPERATION_TYPE = CloudFilters::CF_OPERATION_TYPE_TRANSFER_PLACEHOLDERS;
 
-    type Result = Vec<core::Result<Usn>>;
+    type Result = ();
     type Field = CF_OPERATION_PARAMETERS_0_4;
 
-    unsafe fn result(info: CF_OPERATION_PARAMETERS_0) -> Self::Result {
-        // iterate over the placeholders and return, in a new vector, whether or
-        // not they were created with their new USN
-        if info.TransferPlaceholders.PlaceholderCount == 0 {
-            return vec![];
-        }
-
-        slice::from_raw_parts(
-            info.TransferPlaceholders.PlaceholderArray,
-            info.TransferPlaceholders.PlaceholderCount as usize,
-        )
-        .iter()
-        .map(|placeholder| {
-            placeholder
-                .Result
-                .ok()
-                .map(|_| placeholder.CreateUsn as Usn)
-        })
-        .collect()
-    }
+    unsafe fn result(_info: CF_OPERATION_PARAMETERS_0) -> Self::Result {}
 
     fn build(&self) -> CF_OPERATION_PARAMETERS_0 {
         CF_OPERATION_PARAMETERS_0 {
@@ -279,7 +263,7 @@ impl Fallible for Validate {
 #[derive(Debug)]
 pub struct Dehydrate<'a> {
     /// Optional file blob to update.
-    pub blob: Option<&'a [u8]>,
+    pub blob: &'a [u8],
 }
 
 impl Command for Dehydrate<'_> {
@@ -295,10 +279,11 @@ impl Command for Dehydrate<'_> {
             AckDehydrate: CF_OPERATION_PARAMETERS_0_5 {
                 Flags: CloudFilters::CF_OPERATION_ACK_DEHYDRATE_FLAG_NONE,
                 CompletionStatus: Foundation::STATUS_SUCCESS,
-                FileIdentity: self
-                    .blob
-                    .map_or(ptr::null(), |blob| blob.as_ptr() as *const _),
-                FileIdentityLength: self.blob.map_or(0, |blob| blob.len() as u32),
+                FileIdentity: match self.blob.is_empty() {
+                    true => ptr::null(),
+                    false => self.blob.as_ptr() as *const _,
+                },
+                FileIdentityLength: self.blob.len() as u32,
             },
         }
     }

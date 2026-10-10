@@ -1,41 +1,65 @@
 [package]
 name = "wincs"
 version = "0.1.0"
+authors = [
+  "ok-nick <nick.libraries@gmail.com>",
+  "ho-229 <ho229v3666@gmail.com>",
+]
 edition = "2021"
+description = "A safe and idiomatic wrapper around the Windows Cloud Filter API"
+license = "MIT"
+repository = "https://github.com/sambafied/fork-ok-nick-wincs"
+publish = false
+documentation = "https://docs.rs/cloud-filter"
+exclude = ["examples/", ".github/", "test/"]
+
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
 
 [dependencies]
-widestring = "1.1.0"
-windows = { version = "0.61.3", features = [
+flagset = "0.4.5"
+log = "0.4"
+widestring = "1.0.2"
+nt-time = "0.8.0"
+memoffset = "0.9.1"
+windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_Storage_CloudFilters",
-  "Win32_System_SystemServices",
   "Win32_System_CorrelationVector",
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
   "Storage_Provider",
   "Win32_System_Memory",
   "Storage",
+  "Storage_Search",
   "Foundation",
   "Foundation_Collections",
   "Win32_Security_Authorization",
   "Win32_UI_Shell",
   "Win32_System_Com",
   "Win32_UI_Shell_PropertiesSystem",
-  "Win32_System_Com_StructuredStorage",
-  "Win32_Storage_EnhancedStorage",
-  "Win32_System_Ole",
   "Win32_System_Search",
   "Storage_Streams",
   "Win32_System_Ioctl",
   "Win32_Security",
-  "Win32_System_Variant",
-  "Storage_Search",
 ] }
-globset = { version = "0.4.14", optional = true }
+globset = { version = "0.4.9", optional = true }
+
+[dev-dependencies]
+libtest-mimic = "0.7.3"
+futures = "0.3.30"
+anyhow = "1.0.86"
+widestring = "1.0.2"
+ssh2 = "0.9.4"
+thiserror = "1.0.30"
+ctrlc = "3.4.4"
+tempfile = "3"
 
 [features]
 # Enable globs in the `info::FetchPlaceholders` struct.
 globs = ["globset"]
 
-[workspace]
-members = ["examples/*"]
+[[test]]
+harness = false
+name = "behavior"
+path = "tests/behavior/main.rs"

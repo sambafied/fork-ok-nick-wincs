@@ -1,28 +1,29 @@
+#![doc = include_str!("../README.md")]
+
+/// Contains callbacks error types.
+pub mod error;
+/// Contains traits extending common structs from the [std].
+pub mod ext;
+/// Contains the [SyncFilter][crate::filter::SyncFilter] and [Filter][crate::filter::Filter] traits
+/// and related structs.
+pub mod filter;
+/// Contains the [Metadata][crate::metadata::Metadata] struct.
+pub mod metadata;
+/// Contains the [Placeholder][crate::placeholder::Placeholder] struct.
+pub mod placeholder;
+/// Contains the [PlaceholderFile][crate::placeholder_file::PlaceholderFile] struct.
+pub mod placeholder_file;
+/// Contains the sync root structs.
+pub mod root;
+pub mod usn;
+pub mod utility;
+
 /// Contains low-level structs for directly executing Cloud Filter operations.
 ///
 /// The [command][crate::command] API is exposed through various higher-level structs, like
-/// [Request][crate::Request] and [Placeholder][crate::Placeholder]. Thus, it is not necessary to
-/// create and call these structs manually unless you need more granular access.
-pub mod command;
-mod error;
-/// Contains traits extending common structs from the [std][std].
-pub mod ext;
-mod filter;
-mod placeholder;
-mod placeholder_file;
-mod request;
-mod root;
-mod usn;
-mod utility;
+/// [Request][crate::request::Request] and [Placeholder][crate::placeholder::Placeholder].
+mod command;
 
-pub use error::CloudErrorKind;
-pub use filter::{info, ticket, SyncFilter};
-pub use placeholder::{Placeholder, UpdateOptions};
-pub use placeholder_file::{BatchCreate, Metadata, PlaceholderFile};
-pub use request::{Process, Request};
-pub use root::{
-    active_roots, is_supported, Connection, HydrationPolicy, HydrationType, PopulationType,
-    ProtectionMode, Registration, SecurityId, Session, SupportedAttributes, SyncRootId,
-    SyncRootIdBuilder,
-};
-pub use usn::Usn;
+mod sealed {
+    pub trait Sealed {}
+}

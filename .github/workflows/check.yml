@@ -1,16 +1,8 @@
 name: check
+
+# Local validation is the Sambafied default; hosted runs are explicit only.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "**.rs"
-      - "**/Cargo.toml"
-      - ".github/workflows/check.yml"
-  pull_request:
-    paths:
-      - "**.rs"
-      - "**/Cargo.toml"
-      - ".github/workflows/check.yml"
 
 jobs:
   lint:
@@ -25,7 +17,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: clippy
-        run: cargo clippy --all-features
+        run: cargo clippy --all-features --workspace
         env:
           RUSTFLAGS: "-Dwarnings"
   
