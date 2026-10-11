@@ -1,0 +1,117 @@
+   Compiling wincs v0.1.0 (D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.73s
+     Running unittests src\lib.rs (target\x86_64-pc-windows-msvc\debug\deps\wincs-d0963d999b8c58e6.exe)
+
+running 7 tests
+test command::executor::tests::returns_native_output_and_preserves_failure ... ok
+test filter::async_filter::tests::executor_returns_the_completed_result ... ok
+test filter::async_filter::tests::executor_that_does_not_poll_returns_error ... ok
+test filter::proxy::tests::callback_context_borrows_without_consuming_weak_ownership ... ok
+test placeholder::tests::hydration_ranges_use_length_and_reject_overflow ... ok
+test root::session::tests::idle_native_directory_watcher_cancels_and_releases_directory ... ok
+test root::sync_root_id::tests::identifiers_parse_without_panics ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests\behavior\main.rs (target\x86_64-pc-windows-msvc\debug\deps\behavior-7c8c5879f27e099b.exe)
+
+running 12 tests
+test handle_method_matrix                    ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-Ssp6sz
+opening exclusive range handle: protected=false
+range handle open, marking fixture in sync
+issuing nonempty range update
+range update returned, querying ranges
+range queries returned, closing exclusive
+ordinary/protected method matrix PASS: protected=false
+opening exclusive range handle: protected=true
+range handle open, marking fixture in sync
+issuing nonempty range update
+range update returned, querying ranges
+range queries returned, closing exclusive
+ordinary/protected method matrix PASS: protected=true
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-Ssp6sz
+ok
+test handle_ownership                        ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-rZx1m5
+reference clones/owner drop and 128 File transfers PASS; handles 444->444; protected File rejected without revert
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-rZx1m5
+ok
+test acknowledgement_busy_and_mapped         ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-EGQOa1
+open writer and surviving writable view reject barrier; mapped bytes retained: The process cannot access the file because it is being used by another process. (0x80070020)
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-EGQOa1
+ok
+test protected_oplock_break                  ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-FkPjov
+oplock break delayed through last clone; 128 failed acquisitions return E_HANDLE without leak
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-FkPjov
+ok
+test sync_filter                             ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-XiBCXu
+fetch_placeholders: path: "D:\\projects\\sambafied\\_worktrees\\fork-ok-nick-wincs\\15-usn-handle-qualification\\.tmp\\15-16\\fixtures\\sambafied-cf-test-XiBCXu", relative path: ""
+fetch_placeholders: path: "D:\\projects\\sambafied\\_worktrees\\fork-ok-nick-wincs\\15-usn-handle-qualification\\.tmp\\15-16\\fixtures\\sambafied-cf-test-XiBCXu\\dir1", relative path: "dir1"
+fetch_data: path: "test1.txt"
+fetch_data: path: "dir1\\test2.txt"
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-XiBCXu
+ok
+test async_filter                            ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-XIq2ig
+fetch_placeholders: path: "D:\\projects\\sambafied\\_worktrees\\fork-ok-nick-wincs\\15-usn-handle-qualification\\.tmp\\15-16\\fixtures\\sambafied-cf-test-XIq2ig", relative path: ""
+fetch_placeholders: path: "D:\\projects\\sambafied\\_worktrees\\fork-ok-nick-wincs\\15-usn-handle-qualification\\.tmp\\15-16\\fixtures\\sambafied-cf-test-XIq2ig\\dir1", relative path: "dir1"
+fetch_data: path: "test1.txt"
+fetch_data: path: "dir1\\test2.txt"
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-XIq2ig
+ok
+test sync_paged_empty                        ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-kVU3O5
+population callback: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-kVU3O5
+population : 2/2 processed in 1 pages
+population callback: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-kVU3O5\empty
+population empty: 0/0 processed in 0 pages
+population callback: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-kVU3O5\paged
+population paged: 128/128 processed in 4 pages
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-kVU3O5
+ok
+test async_paged_empty                       ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-iu0z60
+population callback: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-iu0z60
+population : 2/2 processed in 1 pages
+population callback: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-iu0z60\empty
+population empty: 0/0 processed in 0 pages
+population callback: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-iu0z60\paged
+population paged: 128/128 processed in 4 pages
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-iu0z60
+ok
+test usn_pointer_output_and_stale_generation ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-8Vr5BV
+conversion output=0; output zero is not a concurrency token
+RAW_USN_UNSUPPORTED dirty-to-clean: wrapper=The file is not in sync with the cloud. (0x80070179); direct control same error
+stale identity/USN rejected, later generation remains dirty
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-8Vr5BV
+ok
+test exclusive_generation_acknowledgement    ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-0PBTED
+conversion output=0; output zero is not a concurrency token
+exclusive acknowledgement PASS: expected FileGeneration { volume: 2755673339100796673, file_id: [225, 216, 226, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0], usn: 49874185784 }; acknowledged FileGeneration { volume: 2755673339100796673, file_id: [225, 216, 226, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0], usn: 49874185864 }
+conversion output=0; output zero is not a concurrency token
+replacement identity rejected
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-0PBTED
+ok
+test acknowledgement_competing_writer        ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-sjihfd
+conversion output=0; output zero is not a concurrency token
+competing writer waited for barrier, N+1 then dirtied and survived
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-sjihfd
+ok
+test registration_cleanup_after_unwind       ... registered owned fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-GAo1rQ
+
+thread 'main' (51824) panicked at tests\behavior\owned_root.rs:162:9:
+injected test failure outside native callback
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+registration absent; retained fixture: D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\15-usn-handle-qualification\.tmp\15-16\fixtures\sambafied-cf-test-GAo1rQ
+ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.34s
+
+     Running unittests examples\cloud-mirror.rs (target\x86_64-pc-windows-msvc\debug\examples\cloud_mirror-88a8e6d7bd995717.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests examples\sftp.rs (target\x86_64-pc-windows-msvc\debug\examples\sftp-da418c461dc60f9d.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
