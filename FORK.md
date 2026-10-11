@@ -73,42 +73,44 @@ cargo test --locked --all-targets --all-features
 cargo doc --locked --no-deps --all-features
 ```
 
-Native requalification on 11 October 2026: six library tests and strict Clippy
-pass. Six native regression cases pass; one positive current-nonzero-USN gate is
-explicitly ignored in that suite and FAILS when enabled. See
-[issue 13/14 evidence](qualification/13-14-native.md). This is partial native
-qualification, not production approval. Cargo.lock is committed for repeatability.
+Current native qualification on 11 October 2026: seven library and twelve native
+cases PASS, zero ignored. Strict Clippy, format and docs PASS. Exact scope and
+reproduction are in [issue 15/16 qualification](qualification/15-16-native.md).
+Earlier issue13/14 failures and receipts remain historical evidence.
+Cargo.lock is committed for repeatability; the package remains unpublished.
 
 ```powershell
-# Existing owned directory, never a shared or production sync root:
-$env:SAMBAFIED_CF_TEST_PARENT = '<absolute-owned-fixture-parent>'
+$env:SAMBAFIED_CF_TEST_PARENT = '<absolute-existing-owned-fixture-parent>'
 $env:SAMBAFIED_RUN_CLOUD_FILTER_TESTS = '1'
 cargo test --locked --all-targets --all-features -- --test-threads=1
-# Separate production gate; currently FAILS (fork #15):
-$env:SAMBAFIED_QUALIFY_CURRENT_USN = '1'
-cargo test --locked --test behavior --all-features -- current_nonzero_usn_acceptance
 ```
 
-The provider tests use a separate bounded client process to cause real population
-and hydration; a provider enumerating its own root did not trigger callbacks.
-The original three-entry/two-content assertions remain. Additional synchronous
-and asynchronous cases exercise empty completion and 128 entries in four pages.
-`FetchPlaceholders::pass_batch` supplies total count and explicit final-page state,
-returns native EntriesProcessed, and leaves per-entry result checking to callers.
-Only the final page disables on-demand population. Legacy pass remains one batch.
+Without opt-in, behavior exits zero with NOT_RUN; that is not acceptance. Roots
+use unique SID/account identities, unregister after disconnect or Rust unwind,
+verify exact identity/path and absence, and retain bytes until owned cleanup.
+Injected unwind is outside FFI, not proof of callback panic containment. Tests
+use separate bounded client processes for population/hydration and write races.
+Original exact entries/contents, empty and 128-entry/four-page population remain.
 
-USN arguments now pass addresses of live mutable values. Conversion's USN is an
-output, while mark-in-sync's USN is conditional input/output. Touched conversion,
-state and info methods reference a real Win32 handle for protected CFAPI handles.
-Remaining protected-handle/ownership paths require fork #16 audit. Native operation
-results are read from the mutated parameter union only after successful execution;
-request identity and other safety-epic requirements remain open.
+Native nonzero-USN dirty-to-clean remains unsupported on this host. It is still
+characterized against direct CFAPI; original failing evidence is preserved. The
+qualified alternative is `Placeholder::acknowledge_uploaded`: validate volume,
+file identity and nonzero USN under an exclusive RH oplock/reference, then change
+state before releasing the barrier. No zero-token/unprotected fallback. Bind the
+observed `FileGeneration` to the exact verified immutable uploaded snapshot in
+the engine. Existing writers/mappings defer acknowledgement; never hold over
+network I/O. Raw `mark_in_sync` stays a low-level API, not the selected upload
+acknowledgement protocol.
 
-Owned registration guards unregister after disconnect on success and Rust unwind,
-verify exact identity/path and absence, and retain fixture bytes for diagnosis.
-Injected unwind is outside FFI. They do not prove panic containment across native
-callbacks. Remove only owned disposable fixtures after unregister checks. Examples
-remain reference code requiring separate audit. Hosted CI was not dispatched.
+All Placeholder handle-taking methods normalize protected handles with referenced
+Win32 lifetime. Guard clones share one native reference and retain the opaque
+owner; failure acquisition is fallible and balanced. Ordinary File ownership
+transfers once; protected asynchronous File conversion is rejected without
+reverting the placeholder. Information clones own their header/identity. Update
+metadata/range pointers and hydration offset/length are repaired. Request identity,
+callback containment and other safety epic criteria remain open. No hosted CI
+was dispatched and examples remain reference code requiring separate audit.
+
 ## Remaining product gates
 
 This is a reviewed wrapper import, not a complete sync engine or production

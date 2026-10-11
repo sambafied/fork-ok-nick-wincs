@@ -1,164 +1,179 @@
 use anyhow::{ensure, Context, Result};
-use std::{
-    fs,
-    mem::{size_of, size_of_val},
-    os::windows::io::AsRawHandle,
-    path::Path,
-};
-use wincs::placeholder::{ConvertOptions, Placeholder};
-use windows::Win32::{
-    Foundation::HANDLE,
-    System::{
-        Ioctl::{FSCTL_READ_FILE_USN_DATA, READ_FILE_USN_DATA, USN_RECORD_V2},
-        IO::DeviceIoControl,
-    },
+use std::{fs, path::Path};
+use wincs::placeholder::{ConvertOptions, Placeholder, UploadAcknowledgement};
+use windows::Win32::Storage::CloudFilters::{
+    CfSetInSyncState, CF_IN_SYNC_STATE_IN_SYNC, CF_SET_IN_SYNC_FLAG_NONE,
 };
 
-fn file_usn(path: &Path) -> Result<i64> {
-    let file = fs::File::open(path)?;
-    usn_for_handle(HANDLE(file.as_raw_handle()))
+fn observe(path: &Path) -> Result<wincs::placeholder::FileGeneration> {
+    let placeholder = Placeholder::from(fs::File::open(path)?);
+    Ok(placeholder.generation()?)
 }
 
-fn usn_for_handle(handle: HANDLE) -> Result<i64> {
-    let input = READ_FILE_USN_DATA {
-        MinMajorVersion: 2,
-        MaxMajorVersion: 2,
-    };
-    let mut buffer = [0u64; 512];
-    let mut returned = 0;
-    unsafe {
-        DeviceIoControl(
-            handle,
-            FSCTL_READ_FILE_USN_DATA,
-            Some((&input as *const READ_FILE_USN_DATA).cast()),
-            size_of::<READ_FILE_USN_DATA>() as u32,
-            Some(buffer.as_mut_ptr().cast()),
-            size_of_val(&buffer) as u32,
-            Some(&mut returned),
-            None,
-        )
-    }?;
-    ensure!(
-        returned as usize >= size_of::<USN_RECORD_V2>(),
-        "short USN record"
-    );
-    let record = unsafe { &*(buffer.as_ptr().cast::<USN_RECORD_V2>()) };
-    ensure!(record.MajorVersion == 2, "unexpected USN version");
-    ensure!(record.Usn != 0, "actual file USN must be nonzero");
-    Ok(record.Usn)
+fn fixture(path: &Path) -> Result<()> {
+    fs::write(path, b"generation N")?;
+    let mut placeholder = Placeholder::options()
+        .write_access()
+        .foreground()
+        .open(path)?;
+    let mut output = 17;
+    placeholder.convert_to_placeholder(
+        ConvertOptions::default().blob(b"owned-usn".to_vec()),
+        Some(&mut output),
+    )?;
+    ensure!(output != 17, "conversion did not write output");
+    println!("conversion output={output}; output zero is not a concurrency token");
+    Ok(())
 }
 
-pub fn test() -> anyhow::Result<()> {
-    run(false)
-}
-pub fn current_nonzero_acceptance() -> anyhow::Result<()> {
-    run(true)
-}
-
-fn run(require_current_acceptance: bool) -> anyhow::Result<()> {
+pub fn test() -> Result<()> {
     let mut owned = crate::owned_root::OwnedRoot::new()?;
     let connection =
         wincs::root::Session::new().connect(&owned.path, crate::owned_root::EmptyFilter)?;
     let path = owned.path.join("usn.txt");
-    fs::write(&path, b"generation N").context("write initial fixture")?;
-    let mut placeholder = Placeholder::options()
-        .write_access()
-        .foreground()
-        .open(&path)?;
-    // A nonzero sentinel would be an invalid address with the former integer cast.
-    // ConvertUsn is output-only, so the sentinel must never be dereferenced.
-    let mut converted = 17i64;
-    placeholder
-        .convert_to_placeholder(
-            ConvertOptions::default().blob(b"owned-usn".to_vec()),
-            Some(&mut converted),
-        )
-        .context("convert ordinary to placeholder with nonzero output sentinel")?;
-    ensure!(converted != 17, "conversion did not write output USN");
-    drop(placeholder);
-    let mut placeholder =
-        Placeholder::from(fs::OpenOptions::new().read(true).write(true).open(&path)?);
-    // Read the USN through the same handle: closing/reopening an observer can
-    // itself advance this cloud file's USN before the conditional operation.
-    let current = usn_for_handle(placeholder.inner_handle().handle())?;
-    println!("before matching state: convert output={converted}, same-handle current={current}");
-    let mut matching = current;
-    let wrapper_result = placeholder
-        .mark_in_sync(true, Some(&mut matching))
-        .map(|_| ());
-    if let Err(error) = &wrapper_result {
-        let mut control_usn = usn_for_handle(placeholder.inner_handle().handle())?;
-        let control = unsafe {
-            windows::Win32::Storage::CloudFilters::CfSetInSyncState(
-                placeholder.inner_handle().handle(),
-                windows::Win32::Storage::CloudFilters::CF_IN_SYNC_STATE_IN_SYNC,
-                windows::Win32::Storage::CloudFilters::CF_SET_IN_SYNC_FLAG_NONE,
-                Some(std::ptr::from_mut(&mut control_usn)),
-            )
-        };
-        println!("matching USN wrapper={error}; direct native control={control:?}; control USN={control_usn}");
-        ensure!(
-            error.code().0 as u32 == 0x80070179,
-            "unexpected wrapper failure"
-        );
-        ensure!(
-            control
-                .err()
-                .context("direct native control unexpectedly succeeded")?
-                .code()
-                == error.code(),
-            "wrapper differs from native control"
-        );
+    fixture(&path)?;
+    let generation = observe(&path)?;
+    ensure!(generation.usn() != 0);
+    // Characterize raw CFAPI. This is not the chosen production strategy, nor
+    // counted as positive raw-USN acceptance if the native API rejects it.
+    {
+        let mut placeholder = Placeholder::options()
+            .write_access()
+            .exclusive()
+            .open(&path)?;
+        let reference = placeholder.win32_handle()?;
+        let mut token = placeholder.generation()?.usn();
+        let wrapper = placeholder.mark_in_sync(true, Some(&mut token)).map(|_| ());
+        if let Err(error) = &wrapper {
+            let mut native_token = placeholder.generation()?.usn();
+            let native = unsafe {
+                CfSetInSyncState(
+                    reference.handle(),
+                    CF_IN_SYNC_STATE_IN_SYNC,
+                    CF_SET_IN_SYNC_FLAG_NONE,
+                    Some(std::ptr::from_mut(&mut native_token)),
+                )
+            };
+            ensure!(error.code().0 as u32 == 0x80070179);
+            ensure!(
+                native
+                    .err()
+                    .context("raw control unexpectedly succeeded")?
+                    .code()
+                    == error.code()
+            );
+            println!(
+                "RAW_USN_UNSUPPORTED dirty-to-clean: wrapper={error}; direct control same error"
+            );
+        } else {
+            println!("RAW_USN_ACCEPTED on this host");
+        }
     }
-    if require_current_acceptance {
-        wrapper_result.context("mark matching nonzero USN in sync; unresolved fork #15")?;
-    } else if wrapper_result.is_err() {
-        println!("LIMITATION fork #15: current nonzero USN acceptance NOT_PASSED; direct native control reproduces rejection");
-        // Establish a test baseline only. Unconditional marking is NOT a
-        // production substitute for expected-generation/USN concurrency safety.
-        placeholder.mark_in_sync(true, None)?;
-    }
-    ensure!(
-        placeholder
-            .info()
-            .context("query converted info")?
-            .context("placeholder info")?
-            .is_in_sync(),
-        "matching USN not in sync"
-    );
-    drop(placeholder);
-    let old = file_usn(&path)?;
+    // Re-observe after the diagnostic: even failed native operations can advance
+    // the file's journal USN. Never retry a prior token as an unconditional call.
+    let old = observe(&path)?;
     fs::write(&path, b"generation N+1")?;
-    fs::OpenOptions::new().write(true).open(&path)?.sync_all()?;
-    let changed = file_usn(&path)?;
-    ensure!(old != changed, "edit did not advance real USN");
-    let mut placeholder = Placeholder::options()
-        .write_access()
-        .foreground()
-        .open(&path)?;
-    // Explicitly mark dirty even if the chosen registration has no auto-clear policy.
-    placeholder.mark_in_sync(false, None)?;
-    let mut stale = old;
-    let error = placeholder
-        .mark_in_sync(true, Some(&mut stale))
-        .err()
-        .context("stale USN accepted")?;
+    let current = observe(&path)?;
+    ensure!(old != current, "edit failed to change USN");
     ensure!(
-        error.code().0 as u32 == 0x80070179,
-        "unexpected stale USN error: {error}"
+        Placeholder::acknowledge_uploaded(&path, old).is_err(),
+        "stale generation accepted"
     );
     ensure!(
-        !placeholder.info()?.context("dirty info")?.is_in_sync(),
-        "later generation marked clean"
+        !Placeholder::open(&path)?
+            .info()?
+            .context("info")?
+            .is_in_sync(),
+        "later generation clean"
     );
-    ensure!(fs::read(&path)? == b"generation N+1", "later bytes lost");
-    println!("USN conversion output={converted}, current input={current}, current output={matching}; stale={old}, changed={changed}, rejection={error}");
-    drop(placeholder);
+    ensure!(fs::read(&path)? == b"generation N+1");
+    println!("stale identity/USN rejected, later generation remains dirty");
     drop(connection);
     owned.finish()?;
-    ensure!(
-        fs::read(&path)? == b"generation N+1",
-        "unregister lost later bytes"
+    ensure!(fs::read(&path)? == b"generation N+1");
+    Ok(())
+}
+
+pub fn exclusive_acceptance() -> Result<()> {
+    let mut owned = crate::owned_root::OwnedRoot::new()?;
+    let connection =
+        wincs::root::Session::new().connect(&owned.path, crate::owned_root::EmptyFilter)?;
+    let path = owned.path.join("ack.txt");
+    fixture(&path)?;
+    let expected = observe(&path)?;
+    let acknowledged = Placeholder::acknowledge_uploaded(&path, expected)?;
+    ensure!(acknowledged.usn() != 0);
+    ensure!(Placeholder::open(&path)?
+        .info()?
+        .context("info")?
+        .is_in_sync());
+    ensure!(fs::read(&path)? == b"generation N");
+    println!(
+        "exclusive acknowledgement PASS: expected {expected:?}; acknowledged {acknowledged:?}"
     );
+    // Same name, different file identity must never inherit the old upload.
+    fs::rename(&path, owned.path.join("old.txt"))?;
+    fixture(&path)?;
+    ensure!(
+        Placeholder::acknowledge_uploaded(&path, expected).is_err(),
+        "replacement accepted"
+    );
+    ensure!(!Placeholder::open(&path)?
+        .info()?
+        .context("info")?
+        .is_in_sync());
+    println!("replacement identity rejected");
+    drop(connection);
+    owned.finish()?;
+    Ok(())
+}
+
+pub fn competing_writer() -> Result<()> {
+    let mut owned = crate::owned_root::OwnedRoot::new()?;
+    let connection =
+        wincs::root::Session::new().connect(&owned.path, crate::owned_root::EmptyFilter)?;
+    let path = owned.path.join("ack.txt");
+    fixture(&path)?;
+    let expected = observe(&path)?;
+    let barrier = UploadAcknowledgement::begin(&path, expected)?;
+    let marker = owned.path.join("writer-ready");
+    let mut child = std::process::Command::new(std::env::current_exe()?)
+        .arg("--write-client")
+        .arg(&path)
+        .arg(&marker)
+        .spawn()?;
+    let result = (|| -> Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !marker.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        ensure!(marker.exists(), "writer did not reach open");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        ensure!(child.try_wait()?.is_none(), "writer bypassed barrier");
+        barrier.commit()?;
+        while child.try_wait()?.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        ensure!(child.try_wait()?.context("writer timeout")?.success());
+        ensure!(fs::read(&path)? == b"generation N+1");
+        ensure!(
+            !Placeholder::open(&path)?
+                .info()?
+                .context("info")?
+                .is_in_sync(),
+            "N+1 stays clean"
+        );
+        println!("competing writer waited for barrier, N+1 then dirtied and survived");
+        Ok(())
+    })();
+    // Even assertion/ordinary errors must not strand a blocked child.
+    if child.try_wait()?.is_none() {
+        child.kill()?;
+        child.wait()?;
+    }
+    result?;
+    drop(connection);
+    owned.finish()?;
+    ensure!(fs::read(&path)? == b"generation N+1");
     Ok(())
 }

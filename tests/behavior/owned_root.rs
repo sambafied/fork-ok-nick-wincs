@@ -113,6 +113,43 @@ pub fn cleanup_failed(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Read-only final cleanup check for all unique fixtures inside an owned parent.
+pub fn verify_absent(parent: &Path) -> Result<()> {
+    ensure!(
+        parent.is_absolute() && parent.is_dir(),
+        "absolute owned parent required"
+    );
+    let marker = fs::read_to_string(parent.join("OWNER.txt"))?;
+    ensure!(
+        marker.starts_with("Issue 13/14 owned native fixtures"),
+        "ownership marker mismatch"
+    );
+    let mut checked = 0;
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir()
+            || !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("sambafied-cf-test-")
+        {
+            continue;
+        }
+        let id = SyncRootIdBuilder::new("sync_filter_test_provider")
+            .user_security_id(SecurityId::current_user()?)
+            .account_name(entry.file_name())
+            .build();
+        ensure!(
+            !id.is_registered()?,
+            "owned registration persists: {}",
+            entry.path().display()
+        );
+        checked += 1;
+    }
+    println!("verified {checked} exact owned registrations absent");
+    Ok(())
+}
+
 pub fn cleanup_after_unwind() -> anyhow::Result<()> {
     let owned = OwnedRoot::new()?;
     let id = owned.id.clone();
@@ -135,6 +172,19 @@ pub fn cleanup_after_unwind() -> anyhow::Result<()> {
 
 pub struct EmptyFilter;
 impl wincs::filter::SyncFilter for EmptyFilter {
+    fn fetch_placeholders(
+        &self,
+        _: wincs::filter::Request,
+        ticket: wincs::filter::ticket::FetchPlaceholders,
+        _: wincs::filter::info::FetchPlaceholders,
+    ) -> wincs::error::CResult<()> {
+        // This isolated provider has no remote children. Local ordinary fixtures
+        // already present remain intact; this does not seed expected test bytes.
+        ticket
+            .pass_batch(&mut [], 0, true)
+            .map(|_| ())
+            .map_err(|_| wincs::error::CloudErrorKind::Unsuccessful)
+    }
     fn fetch_data(
         &self,
         _: wincs::filter::Request,

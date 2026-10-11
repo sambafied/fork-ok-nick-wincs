@@ -1,26 +1,34 @@
 use std::{
     fmt::Debug,
     fs::File,
-    mem::{self, MaybeUninit},
+    mem::{self, ManuallyDrop},
     ops::{Bound, Range, RangeBounds},
     os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, RawHandle},
     path::Path,
     ptr,
+    sync::Arc,
 };
 
 use widestring::U16CString;
 use windows::{
-    core::{self, BOOL, PCWSTR},
+    core::{self, PCWSTR},
     Win32::{
-        Foundation::{CloseHandle, ERROR_NOT_A_CLOUD_FILE, E_HANDLE, HANDLE, INVALID_HANDLE_VALUE},
+        Foundation::{
+            CloseHandle, ERROR_CLOUD_FILE_NOT_IN_SYNC, ERROR_NOT_A_CLOUD_FILE, E_HANDLE,
+            E_INVALIDARG, E_UNEXPECTED, HANDLE,
+        },
         Storage::CloudFilters::{
             self, CfCloseHandle, CfConvertToPlaceholder, CfGetPlaceholderInfo,
             CfGetPlaceholderRangeInfo, CfGetWin32HandleFromProtectedHandle, CfHydratePlaceholder,
             CfOpenFileWithOplock, CfReferenceProtectedHandle, CfReleaseProtectedHandle,
-            CfRevertPlaceholder, CfSetInSyncState, CfSetPinState, CfUpdatePlaceholder,
-            CF_CONVERT_FLAGS, CF_FILE_RANGE, CF_OPEN_FILE_FLAGS, CF_PIN_STATE,
-            CF_PLACEHOLDER_RANGE_INFO_CLASS, CF_PLACEHOLDER_STANDARD_INFO, CF_SET_PIN_FLAGS,
-            CF_UPDATE_FLAGS,
+            CfSetInSyncState, CfSetPinState, CfUpdatePlaceholder, CF_CONVERT_FLAGS, CF_FILE_RANGE,
+            CF_OPEN_FILE_FLAGS, CF_PIN_STATE, CF_PLACEHOLDER_RANGE_INFO_CLASS,
+            CF_PLACEHOLDER_STANDARD_INFO, CF_SET_PIN_FLAGS, CF_UPDATE_FLAGS,
+        },
+        Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO},
+        System::{
+            Ioctl::{FSCTL_READ_FILE_USN_DATA, READ_FILE_USN_DATA, USN_RECORD_V2},
+            IO::DeviceIoControl,
         },
     },
 };
@@ -93,51 +101,46 @@ impl Drop for OwnedPlaceholderHandle {
 
 /// Holds a Win32 handle from the protected handle.
 ///
-/// The reference count will increase when the [ArcWin32Handle] is cloned
-/// and decrease when the [ArcWin32Handle] is dropped.
+/// Clones share one successful native reference. The final clone releases it,
+/// then permits the opaque owner to close. Keep these guards short-lived: a
+/// reference delays acknowledgement of an oplock break.
+#[derive(Clone)]
 pub struct ArcWin32Handle {
+    inner: Arc<ProtectedReference>,
+}
+
+struct ProtectedReference {
     win32_handle: HANDLE,
-    protected_handle: HANDLE,
+    owner: Arc<OwnedPlaceholderHandle>,
 }
 
 impl ArcWin32Handle {
     /// Win32 handle from the protected handle.
     pub fn handle(&self) -> HANDLE {
-        self.win32_handle
-    }
-}
-
-impl Clone for ArcWin32Handle {
-    fn clone(&self) -> Self {
-        if self.protected_handle != INVALID_HANDLE_VALUE {
-            unsafe { CfReferenceProtectedHandle(self.protected_handle) };
-        }
-
-        Self {
-            win32_handle: self.win32_handle,
-            protected_handle: self.protected_handle,
-        }
+        self.inner.win32_handle
     }
 }
 
 impl AsRawHandle for ArcWin32Handle {
     fn as_raw_handle(&self) -> RawHandle {
-        unsafe { mem::transmute(self.win32_handle) }
+        self.handle().0
     }
 }
 
-impl Drop for ArcWin32Handle {
+impl Drop for ProtectedReference {
     fn drop(&mut self) {
-        if self.protected_handle != INVALID_HANDLE_VALUE {
-            unsafe { CfReleaseProtectedHandle(self.protected_handle) };
-        }
+        unsafe { CfReleaseProtectedHandle(self.owner.handle) };
     }
 }
 
 /// Safety: reference counted by syscall
-unsafe impl Send for ArcWin32Handle {}
+unsafe impl Send for ProtectedReference {}
 /// Safety: reference counted by syscall
-unsafe impl Sync for ArcWin32Handle {}
+unsafe impl Sync for ProtectedReference {}
+
+// Ownership only; methods using a protected Win32 handle acquire a reference.
+unsafe impl Send for OwnedPlaceholderHandle {}
+unsafe impl Sync for OwnedPlaceholderHandle {}
 
 /// Options for opening a placeholder file/directory.
 pub struct OpenOptions {
@@ -171,10 +174,11 @@ impl OpenOptions {
 
     /// Open the placeholder file/directory using `CfOpenFileWithOplock`.
     pub fn open(self, path: impl AsRef<Path>) -> core::Result<Placeholder> {
-        let u16_path = U16CString::from_os_str(path.as_ref()).unwrap();
+        let u16_path =
+            U16CString::from_os_str(path.as_ref()).map_err(|_| core::Error::from(E_INVALIDARG))?;
         let handle = unsafe { CfOpenFileWithOplock(PCWSTR(u16_path.as_ptr()), self.flags) }?;
         Ok(Placeholder {
-            handle: unsafe { OwnedPlaceholderHandle::from_cfapi(handle) },
+            handle: Arc::new(unsafe { OwnedPlaceholderHandle::from_cfapi(handle) }),
         })
     }
 }
@@ -346,45 +350,45 @@ impl Default for ConvertOptions {
 
 #[derive(Clone)]
 pub struct PlaceholderInfo {
-    data: Vec<u8>,
-    info: *const CF_PLACEHOLDER_STANDARD_INFO,
+    info: CF_PLACEHOLDER_STANDARD_INFO,
+    blob: Vec<u8>,
 }
 
 impl PlaceholderInfo {
     pub fn on_disk_data_size(&self) -> i64 {
-        unsafe { &*self.info }.OnDiskDataSize
+        self.info.OnDiskDataSize
     }
 
     pub fn validated_data_size(&self) -> i64 {
-        unsafe { &*self.info }.ValidatedDataSize
+        self.info.ValidatedDataSize
     }
 
     pub fn modified_data_size(&self) -> i64 {
-        unsafe { &*self.info }.ModifiedDataSize
+        self.info.ModifiedDataSize
     }
 
     pub fn properties_size(&self) -> i64 {
-        unsafe { &*self.info }.PropertiesSize
+        self.info.PropertiesSize
     }
 
     pub fn pin_state(&self) -> PinState {
-        unsafe { &*self.info }.PinState.into()
+        self.info.PinState.into()
     }
 
     pub fn is_in_sync(&self) -> bool {
-        unsafe { &*self.info }.InSyncState == CloudFilters::CF_IN_SYNC_STATE_IN_SYNC
+        self.info.InSyncState == CloudFilters::CF_IN_SYNC_STATE_IN_SYNC
     }
 
     pub fn file_id(&self) -> i64 {
-        unsafe { &*self.info }.FileId
+        self.info.FileId
     }
 
     pub fn sync_root_file_id(&self) -> i64 {
-        unsafe { &*self.info }.SyncRootFileId
+        self.info.SyncRootFileId
     }
 
     pub fn blob(&self) -> &[u8] {
-        &self.data[mem::size_of::<CF_PLACEHOLDER_STANDARD_INFO>()..]
+        &self.blob
     }
 }
 
@@ -597,17 +601,156 @@ impl From<ReadType> for CF_PLACEHOLDER_RANGE_INFO_CLASS {
 /// A struct to perform various operations on a placeholder(or regular) file/directory.
 #[derive(Debug)]
 pub struct Placeholder {
-    handle: OwnedPlaceholderHandle,
+    handle: Arc<OwnedPlaceholderHandle>,
+}
+
+/// Identity and nonzero NTFS USN of a local generation. Persist alongside the
+/// immutable uploaded snapshot and its hash; this token does not verify a remote
+/// upload or provide a snapshot barrier by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileGeneration {
+    volume: u64,
+    file_id: [u8; 16],
+    usn: Usn,
+}
+
+impl FileGeneration {
+    /// Restore the exact token persisted with an immutable snapshot. This does
+    /// not assert that an upload was authorized or remotely verified.
+    pub fn from_parts(volume: u64, file_id: [u8; 16], usn: Usn) -> core::Result<Self> {
+        if usn <= 0 {
+            return Err(E_INVALIDARG.into());
+        }
+        Ok(Self {
+            volume,
+            file_id,
+            usn,
+        })
+    }
+
+    pub fn volume(&self) -> u64 {
+        self.volume
+    }
+    pub fn file_id(&self) -> [u8; 16] {
+        self.file_id
+    }
+    pub fn usn(&self) -> Usn {
+        self.usn
+    }
+}
+
+/// A short exclusive acknowledgement barrier. Never retain across network I/O.
+/// Dropping without `commit` changes no sync state and releases pending openers.
+pub struct UploadAcknowledgement {
+    reference: ArcWin32Handle,
+    expected: FileGeneration,
+}
+
+impl UploadAcknowledgement {
+    pub fn begin(path: impl AsRef<Path>, expected: FileGeneration) -> core::Result<Self> {
+        let placeholder = Placeholder::options()
+            .exclusive()
+            .write_access()
+            .open(path)?;
+        let reference = placeholder.win32_handle()?;
+        if generation_for_handle(reference.handle())? != expected {
+            return Err(ERROR_CLOUD_FILE_NOT_IN_SYNC.to_hresult().into());
+        }
+        Ok(Self {
+            reference,
+            expected,
+        })
+    }
+
+    pub fn commit(self) -> core::Result<FileGeneration> {
+        if generation_for_handle(self.reference.handle())? != self.expected {
+            return Err(ERROR_CLOUD_FILE_NOT_IN_SYNC.to_hresult().into());
+        }
+        unsafe {
+            CfSetInSyncState(
+                self.reference.handle(),
+                CloudFilters::CF_IN_SYNC_STATE_IN_SYNC,
+                CloudFilters::CF_SET_IN_SYNC_FLAG_NONE,
+                None,
+            )
+        }?;
+        generation_for_handle(self.reference.handle())
+    }
+}
+
+fn generation_for_handle(handle: HANDLE) -> core::Result<FileGeneration> {
+    let mut identity = FILE_ID_INFO::default();
+    unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileIdInfo,
+            ptr::from_mut(&mut identity).cast(),
+            mem::size_of::<FILE_ID_INFO>() as u32,
+        )
+    }?;
+    let input = READ_FILE_USN_DATA {
+        MinMajorVersion: 2,
+        MaxMajorVersion: 2,
+    };
+    let mut buffer = [0u64; 512];
+    let mut returned = 0;
+    unsafe {
+        DeviceIoControl(
+            handle,
+            FSCTL_READ_FILE_USN_DATA,
+            Some(ptr::from_ref(&input).cast()),
+            mem::size_of_val(&input) as u32,
+            Some(buffer.as_mut_ptr().cast()),
+            mem::size_of_val(&buffer) as u32,
+            Some(&mut returned),
+            None,
+        )
+    }?;
+    if (returned as usize) < mem::size_of::<USN_RECORD_V2>() {
+        return Err(E_UNEXPECTED.into());
+    }
+    let record = unsafe { &*buffer.as_ptr().cast::<USN_RECORD_V2>() };
+    if record.MajorVersion != 2 || record.Usn <= 0 {
+        return Err(E_UNEXPECTED.into());
+    }
+    Ok(FileGeneration {
+        volume: identity.VolumeSerialNumber,
+        file_id: identity.FileId.Identifier,
+        usn: record.Usn,
+    })
 }
 
 impl Placeholder {
+    /// Observe the handle's identity and nonzero NTFS USN. The caller must bind
+    /// this observation to its qualified immutable snapshot, not a timer/size.
+    pub fn generation(&self) -> core::Result<FileGeneration> {
+        self.with_win32_handle(generation_for_handle)
+    }
+
+    /// Acknowledge an already verified uploaded generation using a short exclusive
+    /// RH oplock barrier. Conflicting opens wait until the reference is released;
+    /// existing writers/writable mappings prevent acquisition. A replaced file or
+    /// stale USN fails before changing state. Do not hold this barrier over upload.
+    ///
+    /// Unlike the raw conditional `mark_in_sync`, this does not rely on CFAPI's
+    /// nonzero-USN transition on a dirty placeholder. The native state change has
+    /// no USN argument only after validating the nonzero identity/USN under the
+    /// retained exclusive reference. Any acquisition/query/state error is returned.
+    pub fn acknowledge_uploaded(
+        path: impl AsRef<Path>,
+        expected: FileGeneration,
+    ) -> core::Result<FileGeneration> {
+        UploadAcknowledgement::begin(path, expected)?.commit()
+    }
     /// Create a placeholder from a raw handle.
     ///
     /// # Safety
     ///
     /// The passed handle must be a valid protected handle or win32 handle.
     pub unsafe fn from_raw_handle(handle: OwnedPlaceholderHandle) -> Self {
-        Self { handle }
+        Self {
+            handle: Arc::new(handle),
+        }
     }
 
     /// Open options for opening [Placeholder]s.
@@ -669,7 +812,9 @@ impl Placeholder {
     /// [CfSetPinState](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfsetpinstate),
     /// [What does "Pinned" Mean?](https://www.userfilesystem.com/programming/faq/#nav_howdoesthealwayskeeponthisdevicemenuworks)
     pub fn mark_pin(&mut self, state: PinState, options: PinOptions) -> core::Result<&mut Self> {
-        unsafe { CfSetPinState(self.handle.handle, state.into(), options.0, None) }?;
+        self.with_win32_handle(|handle| unsafe {
+            CfSetPinState(handle, state.into(), options.0, None)
+        })?;
         Ok(self)
     }
 
@@ -705,64 +850,47 @@ impl Placeholder {
     ///
     /// If the placeholder blob size is known, use [fixed_size_info](Self::fixed_size_info) instead.
     pub fn info(&self) -> core::Result<Option<PlaceholderInfo>> {
-        let mut info_size = 0;
-        let mut data = vec![0u8; mem::size_of::<CF_PLACEHOLDER_STANDARD_INFO>() + 4096];
-        let r = self.with_win32_handle(|handle| unsafe {
+        self.fixed_size_info(CloudFilters::CF_PLACEHOLDER_MAX_FILE_IDENTITY_LENGTH as usize)
+    }
+
+    /// Queries placeholder information with capacity for `blob_size` identity bytes.
+    /// Returns native insufficient-buffer errors; no partially initialized result.
+    pub fn fixed_size_info(&self, blob_size: usize) -> core::Result<Option<PlaceholderInfo>> {
+        if blob_size > CloudFilters::CF_PLACEHOLDER_MAX_FILE_IDENTITY_LENGTH as usize {
+            return Err(E_INVALIDARG.into());
+        }
+        let capacity = mem::size_of::<CF_PLACEHOLDER_STANDARD_INFO>() + blob_size;
+        // The native structure requires 8-byte alignment. Own header/identity data
+        // independently so cloning never retains a pointer into another Vec.
+        let mut data = vec![0u64; capacity.div_ceil(mem::size_of::<u64>())];
+        let mut returned = 0u32;
+        let result = self.with_win32_handle(|handle| unsafe {
             CfGetPlaceholderInfo(
                 handle,
                 CloudFilters::CF_PLACEHOLDER_INFO_STANDARD,
-                data.as_mut_ptr() as *mut _,
-                data.len() as _,
-                Some(&mut info_size),
+                data.as_mut_ptr().cast(),
+                capacity as u32,
+                Some(&mut returned),
             )
         });
-
-        match r {
+        match result {
             Ok(()) => {
-                unsafe { data.set_len(info_size as _) };
-                data.shrink_to_fit();
-
-                Ok(Some(PlaceholderInfo {
-                    info: &unsafe {
-                        data[..=mem::size_of::<CF_PLACEHOLDER_STANDARD_INFO>()]
-                            .align_to::<CF_PLACEHOLDER_STANDARD_INFO>()
-                    }
-                    .1[0] as *const _,
-                    data,
-                }))
-            }
-            Err(e) if e.code() == ERROR_NOT_A_CLOUD_FILE.to_hresult() => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Gets various characteristics of the placeholder.
-    ///
-    /// If the `blob_size` not matches the actual size of the blob,
-    /// the call will returns `HRESULT_FROM_WIN32(ERROR_MORE_DATA)`.
-    /// Returns [None] if the handle not points to a placeholder.
-    pub fn fixed_size_info(&self, blob_size: usize) -> core::Result<Option<PlaceholderInfo>> {
-        let mut data = vec![0; mem::size_of::<CF_PLACEHOLDER_STANDARD_INFO>() + blob_size];
-
-        let r = unsafe {
-            CfGetPlaceholderInfo(
-                self.handle.handle,
-                CloudFilters::CF_PLACEHOLDER_INFO_STANDARD,
-                data.as_mut_ptr() as *mut _,
-                data.len() as u32,
-                None,
-            )
-        };
-
-        match r {
-            Ok(()) => Ok(Some(PlaceholderInfo {
-                info: &unsafe {
-                    data[..=mem::size_of::<CF_PLACEHOLDER_STANDARD_INFO>()]
-                        .align_to::<CF_PLACEHOLDER_STANDARD_INFO>()
+                let info =
+                    unsafe { ptr::read(data.as_ptr().cast::<CF_PLACEHOLDER_STANDARD_INFO>()) };
+                let offset = mem::offset_of!(CF_PLACEHOLDER_STANDARD_INFO, FileIdentity);
+                let length = info.FileIdentityLength as usize;
+                if (returned as usize) < offset
+                    || (returned as usize) > capacity
+                    || length > (returned as usize) - offset
+                {
+                    return Err(E_UNEXPECTED.into());
                 }
-                .1[0] as *const _,
-                data,
-            })),
+                let blob = unsafe {
+                    std::slice::from_raw_parts(data.as_ptr().cast::<u8>().add(offset), length)
+                }
+                .to_vec();
+                Ok(Some(PlaceholderInfo { info, blob }))
+            }
             Err(e) if e.code() == ERROR_NOT_A_CLOUD_FILE.to_hresult() => Ok(None),
             Err(e) => Err(e),
         }
@@ -776,42 +904,45 @@ impl Placeholder {
         options: UpdateOptions,
         usn: impl Into<Option<&'a mut Usn>>,
     ) -> core::Result<&mut Self> {
-        unsafe {
+        self.with_win32_handle(|handle| unsafe {
             CfUpdatePlaceholder(
-                self.handle.handle,
-                options.metadata.map(|x| &x.0 as *const _),
+                handle,
+                options.metadata.as_ref().map(|x| ptr::from_ref(&x.0)),
                 (!options.blob.is_empty()).then_some(options.blob.as_ptr() as *const _),
                 options.blob.len() as _,
-                (options.dehydrate_ranges.is_empty()).then_some(&options.dehydrate_ranges),
+                (!options.dehydrate_ranges.is_empty())
+                    .then_some(options.dehydrate_ranges.as_slice()),
                 options.flags,
-                usn.into().map(|u| u as *mut _),
+                usn.into().map(ptr::from_mut),
                 None,
             )
-        }?;
+        })?;
 
         Ok(self)
     }
 
-    /// Retrieves data from a placeholder.
+    /// Retrieves serialized CF_FILE_RANGE records, not file content.
     pub fn retrieve_data(
         &self,
         read_type: ReadType,
         offset: u64,
         buffer: &mut [u8],
     ) -> core::Result<u32> {
-        let mut length = MaybeUninit::zeroed();
-        unsafe {
+        let offset = i64::try_from(offset).map_err(|_| core::Error::from(E_INVALIDARG))?;
+        let size = u32::try_from(buffer.len()).map_err(|_| core::Error::from(E_INVALIDARG))?;
+        let mut length = 0;
+        self.with_win32_handle(|handle| unsafe {
             CfGetPlaceholderRangeInfo(
-                self.handle.handle,
+                handle,
                 read_type.into(),
-                offset as i64,
+                offset,
                 buffer.len() as i64,
-                buffer as *mut _ as *mut _,
-                buffer.len() as u32,
-                Some(length.as_mut_ptr()),
+                buffer.as_mut_ptr().cast(),
+                size,
+                Some(&mut length),
             )
-            .map(|_| length.assume_init())
-        }
+        })?;
+        Ok(length)
     }
 
     // FIXME: This function is not work at all, the CF_PLACEHOLDER_STATE always be 0 or 1
@@ -845,21 +976,23 @@ impl Placeholder {
     ///
     /// Returns `Err(E_HANDLE)` if the [OwnedPlaceholderHandle::handle_type] is not [PlaceholderHandleType::CfApi].
     pub fn win32_handle(&self) -> core::Result<ArcWin32Handle> {
-        let (handle, win32_handle) = match self.handle.handle_type {
-            PlaceholderHandleType::CfApi => {
-                let win32_handle = unsafe {
-                    BOOL::from(CfReferenceProtectedHandle(self.handle.handle)).ok()?;
-                    CfGetWin32HandleFromProtectedHandle(self.handle.handle)
-                };
-                BOOL::from(!win32_handle.is_invalid()).ok()?;
-                (self.handle.handle, win32_handle)
-            }
-            PlaceholderHandleType::Win32 => Err(core::Error::from(E_HANDLE))?,
-        };
-
+        if self.handle.handle_type != PlaceholderHandleType::CfApi {
+            return Err(E_HANDLE.into());
+        }
+        if !unsafe { CfReferenceProtectedHandle(self.handle.handle) } {
+            // CfReferenceProtectedHandle documents only BOOLEAN, not last-error.
+            return Err(E_HANDLE.into());
+        }
+        let win32_handle = unsafe { CfGetWin32HandleFromProtectedHandle(self.handle.handle) };
+        if win32_handle.is_invalid() {
+            unsafe { CfReleaseProtectedHandle(self.handle.handle) };
+            return Err(E_HANDLE.into());
+        }
         Ok(ArcWin32Handle {
-            win32_handle,
-            protected_handle: handle,
+            inner: Arc::new(ProtectedReference {
+                win32_handle,
+                owner: Arc::clone(&self.handle),
+            }),
         })
     }
 
@@ -871,40 +1004,52 @@ impl Placeholder {
     /// Hydrates a placeholder file by ensuring that the specified byte range is present on-disk
     /// in the placeholder. This is valid for files only.
     ///
-    /// # Panics
-    ///
-    /// Panics if the start bound is greater than [i64::MAX] or
-    /// the end bound sub start bound is greater than [i64::MAX].
-    ///
-    /// See also [CfHydratePlaceholder](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfhydrateplaceholder)
-    /// and [discussion](https://docs.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfhydrateplaceholder#remarks).
+    /// Invalid/reversed/overflowing ranges return E_INVALIDARG.
     pub fn hydrate(&mut self, range: impl RangeBounds<u64>) -> core::Result<()> {
-        unsafe {
+        let (offset, length) = hydration_range(range)?;
+        if length == 0 {
+            return Ok(());
+        }
+        self.with_win32_handle(|handle| unsafe {
             CfHydratePlaceholder(
-                self.handle.handle,
-                match range.start_bound() {
-                    Bound::Included(x) => (*x).try_into().unwrap(),
-                    Bound::Excluded(x) => (x + 1).try_into().unwrap(),
-                    Bound::Unbounded => 0,
-                },
-                match range.end_bound() {
-                    Bound::Included(x) => (*x).try_into().unwrap(),
-                    Bound::Excluded(x) => (x - 1).try_into().unwrap(),
-                    Bound::Unbounded => -1,
-                },
+                handle,
+                offset,
+                length,
                 CloudFilters::CF_HYDRATE_FLAG_NONE,
                 None,
             )
-        }
+        })
     }
+}
+
+fn hydration_range(range: impl RangeBounds<u64>) -> core::Result<(i64, i64)> {
+    let invalid = || core::Error::from(E_INVALIDARG);
+    let start = match range.start_bound() {
+        Bound::Included(x) => *x,
+        Bound::Excluded(x) => x.checked_add(1).ok_or_else(invalid)?,
+        Bound::Unbounded => 0,
+    };
+    let offset = i64::try_from(start).map_err(|_| invalid())?;
+    let end = match range.end_bound() {
+        Bound::Included(x) => Some(x.checked_add(1).ok_or_else(invalid)?),
+        Bound::Excluded(x) => Some(*x),
+        Bound::Unbounded => None,
+    };
+    let length = match end {
+        Some(end) => {
+            i64::try_from(end.checked_sub(start).ok_or_else(invalid)?).map_err(|_| invalid())?
+        }
+        None => -1,
+    };
+    Ok((offset, length))
 }
 
 impl From<File> for Placeholder {
     fn from(file: File) -> Self {
         Self {
-            handle: unsafe {
+            handle: Arc::new(unsafe {
                 OwnedPlaceholderHandle::from_win32(HANDLE(file.into_raw_handle() as _))
-            },
+            }),
         }
     }
 }
@@ -912,22 +1057,33 @@ impl From<File> for Placeholder {
 impl TryFrom<Placeholder> for File {
     type Error = core::Error;
 
-    #[allow(clippy::missing_transmute_annotations)]
+    /// Transfers an ordinary synchronous Win32 handle without closing it twice.
+    /// Protected handles are rejected: they are asynchronous and cannot safely
+    /// become std::fs::File; use a short win32_handle guard with overlapped I/O.
+    /// This conversion never reverts or dehydrates the placeholder.
     fn try_from(placeholder: Placeholder) -> core::Result<Self> {
-        match placeholder.handle.handle_type {
-            PlaceholderHandleType::Win32 => {
-                let file =
-                    unsafe { File::from_raw_handle(mem::transmute(placeholder.handle.handle)) };
-                Ok(file)
-            }
-            PlaceholderHandleType::CfApi => unsafe {
-                CfRevertPlaceholder(
-                    placeholder.handle.handle,
-                    CloudFilters::CF_REVERT_FLAG_NONE,
-                    None,
-                )
-            }
-            .map(|_| unsafe { File::from_raw_handle(mem::transmute(placeholder.handle.handle)) }),
+        if placeholder.handle.handle_type != PlaceholderHandleType::Win32 {
+            return Err(E_INVALIDARG.into());
         }
+        let owner = Arc::try_unwrap(placeholder.handle).map_err(|_| core::Error::from(E_HANDLE))?;
+        let owner = ManuallyDrop::new(owner);
+        Ok(unsafe { File::from_raw_handle(owner.handle.0) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn hydration_ranges_use_length_and_reject_overflow() {
+        assert_eq!(hydration_range(5..9).unwrap(), (5, 4));
+        assert_eq!(hydration_range(5..=9).unwrap(), (5, 5));
+        assert_eq!(hydration_range(5..).unwrap(), (5, -1));
+        assert_eq!(hydration_range(0..0).unwrap(), (0, 0));
+        assert!(hydration_range((Bound::Excluded(u64::MAX), Bound::Unbounded)).is_err());
+        assert!(hydration_range((Bound::Included(9), Bound::Excluded(5))).is_err());
+        assert!(hydration_range(..=u64::MAX).is_err());
+        assert!(FileGeneration::from_parts(1, [1; 16], 0).is_err());
+        assert!(FileGeneration::from_parts(1, [1; 16], -1).is_err());
     }
 }

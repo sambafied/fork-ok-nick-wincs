@@ -3,12 +3,29 @@ use std::process::ExitCode;
 use libtest_mimic::{run, Arguments, Trial};
 
 mod async_filter;
+mod handles;
 mod owned_root;
 mod population;
 mod sync_filter;
 mod usn;
 
 fn main() -> ExitCode {
+    if std::env::args_os().nth(1).as_deref()
+        == Some(std::ffi::OsStr::new("--verify-owned-registrations-absent"))
+    {
+        if let Err(error) = owned_root::verify_absent(std::path::Path::new(
+            &std::env::args_os().nth(2).expect("owned parent"),
+        )) {
+            eprintln!("{error:#}");
+            return ExitCode::FAILURE;
+        }
+        return ExitCode::SUCCESS;
+    }
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--write-client")) {
+        std::fs::write(std::env::args_os().nth(3).unwrap(), b"ready").unwrap();
+        std::fs::write(std::env::args_os().nth(2).unwrap(), b"generation N+1").unwrap();
+        return ExitCode::SUCCESS;
+    }
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--verify-client")) {
         let root = std::env::args().nth(2).expect("owned test root");
         test_list_folders(&root);
@@ -38,6 +55,18 @@ fn main() -> ExitCode {
     }
     let args = Arguments::from_args();
     let tests = vec![
+        Trial::test("handle_method_matrix", || {
+            handles::operations().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
+        Trial::test("handle_ownership", || {
+            handles::ownership().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
+        Trial::test("acknowledgement_busy_and_mapped", || {
+            handles::busy_and_mapped().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
+        Trial::test("protected_oplock_break", || {
+            handles::oplock_break().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
         Trial::test("sync_filter", || {
             sync_filter::test().map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
         }),
@@ -55,11 +84,14 @@ fn main() -> ExitCode {
         Trial::test("usn_pointer_output_and_stale_generation", || {
             usn::test().map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
         }),
-        Trial::test("current_nonzero_usn_acceptance", || {
-            usn::current_nonzero_acceptance()
+        Trial::test("exclusive_generation_acknowledgement", || {
+            usn::exclusive_acceptance()
                 .map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
-        })
-        .with_ignored_flag(std::env::var("SAMBAFIED_QUALIFY_CURRENT_USN").as_deref() != Ok("1")),
+        }),
+        Trial::test("acknowledgement_competing_writer", || {
+            usn::competing_writer()
+                .map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
+        }),
         Trial::test("registration_cleanup_after_unwind", || {
             owned_root::cleanup_after_unwind()
                 .map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
