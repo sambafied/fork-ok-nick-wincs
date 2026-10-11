@@ -1,0 +1,22 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running tests\behavior\main.rs (target\x86_64-pc-windows-msvc\debug\deps\behavior-5d88a9ddbaf062a8.exe)
+
+running 1 test
+test current_nonzero_usn_acceptance ... registered owned fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-0kqSOw
+before matching state: convert output=0, same-handle current=49595687344
+matching USN wrapper=The file is not in sync with the cloud. (0x80070179); direct native control=Err(Error { code: HRESULT(0x80070179), message: "The file is not in sync with the cloud." }); control USN=49595687424
+registration absent; retained fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-0kqSOw
+FAILED
+
+failures:
+
+---- current_nonzero_usn_acceptance ----
+mark matching nonzero USN in sync; unresolved fork #15: The file is not in sync with the cloud. (0x80070179)
+
+
+failures:
+    current_nonzero_usn_acceptance
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.58s
+
+error: test failed, to rerun pass `--test behavior`

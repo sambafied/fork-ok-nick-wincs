@@ -13,6 +13,7 @@ use crate::{metadata::Metadata, sealed, usn::Usn};
 
 /// A builder for creating new placeholder files/directories.
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct PlaceholderFile(CF_PLACEHOLDER_CREATE_INFO);
 
 impl PlaceholderFile {

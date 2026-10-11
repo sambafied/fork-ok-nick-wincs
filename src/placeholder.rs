@@ -620,6 +620,21 @@ impl Placeholder {
         OpenOptions::new().open(path)
     }
 
+    // Keep the native handle referenced until the synchronous operation returns.
+    // CfOpenFileWithOplock returns an opaque protected handle, not a Win32 HANDLE.
+    fn with_win32_handle<T>(
+        &self,
+        call: impl FnOnce(HANDLE) -> core::Result<T>,
+    ) -> core::Result<T> {
+        match self.handle.handle_type {
+            PlaceholderHandleType::Win32 => call(self.handle.handle),
+            PlaceholderHandleType::CfApi => {
+                let reference = self.win32_handle()?;
+                call(reference.handle())
+            }
+        }
+    }
+
     /// Marks a placeholder as in sync or not.
     ///
     /// If the passed [Usn] is outdated, the call will fail,
@@ -633,17 +648,17 @@ impl Placeholder {
         in_sync: bool,
         usn: impl Into<Option<&'a mut Usn>>,
     ) -> core::Result<&mut Self> {
-        unsafe {
+        self.with_win32_handle(|handle| unsafe {
             CfSetInSyncState(
-                self.handle.handle,
+                handle,
                 match in_sync {
                     true => CloudFilters::CF_IN_SYNC_STATE_IN_SYNC,
                     false => CloudFilters::CF_IN_SYNC_STATE_NOT_IN_SYNC,
                 },
                 CloudFilters::CF_SET_IN_SYNC_FLAG_NONE,
-                usn.into().map(|x| ptr::read(x) as *mut _),
+                usn.into().map(ptr::from_mut),
             )
-        }?;
+        })?;
 
         Ok(self)
     }
@@ -660,8 +675,9 @@ impl Placeholder {
 
     /// Converts a file to a placeholder file.
     ///
-    /// If the passed [Usn] is outdated, the call will fail,
-    /// otherwise the [Usn] will be updated.
+    /// The optional [Usn] receives the final USN after conversion. Its input
+    /// value is ignored; unlike [Self::mark_in_sync], this is not a conditional
+    /// update against an expected USN.
     ///
     /// See also [CfConvertToPlaceholder](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfconverttoplaceholder).
     pub fn convert_to_placeholder<'a>(
@@ -669,16 +685,16 @@ impl Placeholder {
         options: ConvertOptions,
         usn: impl Into<Option<&'a mut Usn>>,
     ) -> core::Result<&mut Self> {
-        unsafe {
+        self.with_win32_handle(|handle| unsafe {
             CfConvertToPlaceholder(
-                self.handle.handle,
+                handle,
                 (!options.blob.is_empty()).then_some(options.blob.as_ptr() as *const _),
                 options.blob.len() as _,
                 options.flags,
-                usn.into().map(|x| ptr::read(x) as *mut _),
+                usn.into().map(ptr::from_mut),
                 None,
             )
-        }?;
+        })?;
 
         Ok(self)
     }
@@ -691,15 +707,15 @@ impl Placeholder {
     pub fn info(&self) -> core::Result<Option<PlaceholderInfo>> {
         let mut info_size = 0;
         let mut data = vec![0u8; mem::size_of::<CF_PLACEHOLDER_STANDARD_INFO>() + 4096];
-        let r = unsafe {
+        let r = self.with_win32_handle(|handle| unsafe {
             CfGetPlaceholderInfo(
-                self.handle.handle,
+                handle,
                 CloudFilters::CF_PLACEHOLDER_INFO_STANDARD,
                 data.as_mut_ptr() as *mut _,
                 data.len() as _,
                 Some(&mut info_size),
             )
-        };
+        });
 
         match r {
             Ok(()) => {

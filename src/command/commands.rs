@@ -391,3 +391,40 @@ impl Fallible for Rename {
         )
     }
 }
+
+/// Transfer one directory page; only the last page disables on-demand population.
+pub(crate) fn placeholder_batch(
+    placeholders: &mut [PlaceholderFile],
+    total: u64,
+    final_batch: bool,
+    connection_key: RawConnectionKey,
+    transfer_key: RawTransferKey,
+) -> core::Result<u32> {
+    let invalid = || core::Error::from(Foundation::E_INVALIDARG);
+    let count = u32::try_from(placeholders.len()).map_err(|_| invalid())?;
+    let total = i64::try_from(total).map_err(|_| invalid())?;
+    if total < i64::from(count) {
+        return Err(invalid());
+    }
+    let info = CF_OPERATION_PARAMETERS_0 {
+        TransferPlaceholders: CF_OPERATION_PARAMETERS_0_4 {
+            Flags: if final_batch {
+                CloudFilters::CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_DISABLE_ON_DEMAND_POPULATION
+            } else {
+                CloudFilters::CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE
+            },
+            CompletionStatus: Foundation::STATUS_SUCCESS,
+            PlaceholderTotalCount: total,
+            PlaceholderArray: if placeholders.is_empty() {
+                ptr::null_mut()
+            } else {
+                placeholders.as_mut_ptr().cast()
+            },
+            PlaceholderCount: count,
+            EntriesProcessed: 0,
+        },
+    };
+    let output =
+        super::executor::execute_raw::<CreatePlaceholders>(info, connection_key, transfer_key)?;
+    Ok(unsafe { output.TransferPlaceholders.EntriesProcessed })
+}

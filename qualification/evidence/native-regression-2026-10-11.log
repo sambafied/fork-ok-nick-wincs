@@ -1,0 +1,55 @@
+   Compiling wincs v0.1.0 (D:\projects\sambafied\wincs-fix-13-14)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.55s
+     Running tests\behavior\main.rs (target\x86_64-pc-windows-msvc\debug\deps\behavior-5d88a9ddbaf062a8.exe)
+
+running 7 tests
+test sync_filter                             ... registered owned fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-RUAsca
+fetch_placeholders: path: "D:\\projects\\sambafied\\wincs-fix-13-14\\.tmp\\13-14\\sambafied-cf-test-RUAsca", relative path: ""
+fetch_placeholders: path: "D:\\projects\\sambafied\\wincs-fix-13-14\\.tmp\\13-14\\sambafied-cf-test-RUAsca\\dir1", relative path: "dir1"
+fetch_data: path: "test1.txt"
+fetch_data: path: "dir1\\test2.txt"
+registration absent; retained fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-RUAsca
+ok
+test async_filter                            ... registered owned fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-2qCSZ1
+fetch_placeholders: path: "D:\\projects\\sambafied\\wincs-fix-13-14\\.tmp\\13-14\\sambafied-cf-test-2qCSZ1", relative path: ""
+fetch_placeholders: path: "D:\\projects\\sambafied\\wincs-fix-13-14\\.tmp\\13-14\\sambafied-cf-test-2qCSZ1\\dir1", relative path: "dir1"
+fetch_data: path: "test1.txt"
+fetch_data: path: "dir1\\test2.txt"
+registration absent; retained fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-2qCSZ1
+ok
+test sync_paged_empty                        ... registered owned fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-WAKBcD
+population callback: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-WAKBcD
+population : 2/2 processed in 1 pages
+population callback: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-WAKBcD\empty
+population empty: 0/0 processed in 0 pages
+population callback: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-WAKBcD\paged
+population paged: 128/128 processed in 4 pages
+registration absent; retained fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-WAKBcD
+ok
+test async_paged_empty                       ... registered owned fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-IzCCzl
+population callback: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-IzCCzl
+population : 2/2 processed in 1 pages
+population callback: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-IzCCzl\empty
+population empty: 0/0 processed in 0 pages
+population callback: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-IzCCzl\paged
+population paged: 128/128 processed in 4 pages
+registration absent; retained fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-IzCCzl
+ok
+test usn_pointer_output_and_stale_generation ... registered owned fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-4Pps6J
+before matching state: convert output=0, same-handle current=49595589040
+matching USN wrapper=The file is not in sync with the cloud. (0x80070179); direct native control=Err(Error { code: HRESULT(0x80070179), message: "The file is not in sync with the cloud." }); control USN=49595589120
+LIMITATION fork #15: current nonzero USN acceptance NOT_PASSED; direct native control reproduces rejection
+USN conversion output=0, current input=49595589040, current output=49595589040; stale=49595589360, changed=49595589680, rejection=The file is not in sync with the cloud. (0x80070179)
+registration absent; retained fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-4Pps6J
+ok
+test current_nonzero_usn_acceptance          ... ignored
+test registration_cleanup_after_unwind       ... registered owned fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-69gmua
+
+thread 'main' (30988) panicked at tests\behavior\owned_root.rs:125:9:
+injected test failure outside native callback
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+registration absent; retained fixture: D:\projects\sambafied\wincs-fix-13-14\.tmp\13-14\sambafied-cf-test-69gmua
+ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.53s
+
