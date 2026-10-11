@@ -142,15 +142,31 @@ impl FetchPlaceholders {
         }
     }
 
-    /// Creates a list of placeholder files/directorys on the file system.
-    ///
-    /// The value returned is the final [Usn][crate::usn::Usn] (and if they succeeded) after each placeholder is created.
+    /// Creates a complete directory listing in one batch.
+    /// Inspect each placeholder's result after the call for per-entry failures.
     pub fn pass_with_placeholder(&self, placeholders: &mut [PlaceholderFile]) -> core::Result<()> {
-        command::CreatePlaceholders {
-            total: placeholders.len() as _,
+        let count = placeholders.len() as u64;
+        self.pass_batch(placeholders, count, true).map(|_| ())
+    }
+
+    /// Transfers a page and returns the number of entries processed by Windows.
+    /// `total` is the full directory entry count, not the size of this page.
+    /// Set `final_batch` only after all remote pages have been obtained successfully;
+    /// only that call marks population complete. Inspect per-entry results too.
+    /// An empty final page completes an empty directory or a prior page sequence.
+    pub fn pass_batch(
+        &self,
+        placeholders: &mut [PlaceholderFile],
+        total: u64,
+        final_batch: bool,
+    ) -> core::Result<u32> {
+        command::placeholder_batch(
             placeholders,
-        }
-        .execute(self.connection_key, self.transfer_key)
+            total,
+            final_batch,
+            self.connection_key,
+            self.transfer_key,
+        )
     }
 }
 

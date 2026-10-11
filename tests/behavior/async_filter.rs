@@ -1,23 +1,28 @@
 use core::str;
-use std::{fs, future::Future, path::Path, pin::Pin};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use anyhow::Context;
-use libtest_mimic::Failed;
 use nt_time::FileTime;
 use wincs::{
     error::{CResult, CloudErrorKind},
-    filter::{info, ticket, AsyncBridge, Filter, Request},
+    filter::{info, ticket, Filter, Request},
     metadata::Metadata,
     placeholder_file::PlaceholderFile,
-    root::{
-        Connection, HydrationType, PopulationType, SecurityId, Session, SyncRootId,
-        SyncRootIdBuilder, SyncRootInfo,
-    },
+    root::Session,
     utility::WriteAt,
 };
 
 struct MemFilter {
     root: std::path::PathBuf,
+    populations: Arc<AtomicUsize>,
+    hydrations: Arc<AtomicUsize>,
 }
 
 impl Filter for MemFilter {
@@ -40,7 +45,10 @@ impl Filter for MemFilter {
             Err(CloudErrorKind::InvalidRequest)?;
         }
 
-        ticket.write_at(content.as_bytes(), 0).unwrap();
+        ticket
+            .write_at(content.as_bytes(), 0)
+            .map_err(|_| CloudErrorKind::InvalidRequest)?;
+        self.hydrations.fetch_add(1, Ordering::SeqCst);
 
         Ok(())
     }
@@ -52,7 +60,9 @@ impl Filter for MemFilter {
         _info: info::FetchPlaceholders,
     ) -> CResult<()> {
         let path = request.path();
-        let relative_path = path.strip_prefix(&self.root).unwrap();
+        let relative_path = path
+            .strip_prefix(&self.root)
+            .map_err(|_| CloudErrorKind::InvalidRequest)?;
         println!("fetch_placeholders: path: {path:?}, relative path: {relative_path:?}");
 
         let now = FileTime::now();
@@ -86,70 +96,44 @@ impl Filter for MemFilter {
             _ => Err(CloudErrorKind::InvalidRequest)?,
         };
 
-        ticket.pass_with_placeholder(&mut placeholders).unwrap();
+        let count = placeholders.len() as u64;
+        let processed = ticket
+            .pass_batch(&mut placeholders, count, true)
+            .map_err(|_| CloudErrorKind::InvalidRequest)?;
+        if u64::from(processed) != count || placeholders.iter().any(|p| p.result().is_err()) {
+            return Err(CloudErrorKind::InvalidRequest);
+        }
+        self.populations.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }
 
 type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 type Executor = for<'a> fn(LocalBoxFuture<'a, ()>);
-type TestConnection = Connection<AsyncBridge<MemFilter, Executor>>;
 fn execute(future: LocalBoxFuture<'_, ()>) {
     futures::executor::block_on(future);
 }
 
-fn init(root: &str) -> anyhow::Result<(SyncRootId, TestConnection)> {
-    let sync_root_id = SyncRootIdBuilder::new("sync_filter_test_provider")
-        .user_security_id(SecurityId::current_user().context("current_user")?)
-        .account_name(Path::new(root).file_name().context("root name")?)
-        .build();
-
-    if sync_root_id.is_registered().context("is_registered")? {
-        anyhow::bail!("Owned test identity unexpectedly exists; no registration adopted");
-    }
-    {
-        sync_root_id
-            .register(
-                SyncRootInfo::default()
-                    .with_display_name("Sync Filter Test")
-                    .with_hydration_type(HydrationType::Full)
-                    .with_population_type(PopulationType::Full)
-                    .with_icon("%SystemRoot%\\system32\\charmap.exe,0")
-                    .with_version("1.0.0")
-                    .with_recycle_bin_uri("http://cloudmirror.example.com/recyclebin")
-                    .context("recycle_bin_uri")?
-                    .with_path(root)
-                    .context("path")?,
-            )
-            .context("register")?
-    }
-
-    let connection = Session::new()
-        .connect_async(root, MemFilter { root: root.into() }, execute as Executor)
-        .context("connect")?;
-
-    Ok((sync_root_id, connection))
-}
-
-pub fn test() -> Result<(), Failed> {
-    // Fresh owned directory and unique account identity; never adopt a root.
-    // Retain the directory on failures for diagnosis.
-    let owned = tempfile::Builder::new()
-        .prefix("sambafied-cf-test-")
-        .tempdir()
-        .context("owned root")?
-        .keep();
-    let root = owned.to_str().context("root unicode")?;
-
-    let (sync_root_id, connection) = init(root).context("init")?;
-
-    crate::test_list_folders(root);
-    crate::test_read_file(root);
-
+pub fn test() -> anyhow::Result<()> {
+    let mut owned = crate::owned_root::OwnedRoot::new()?;
+    let populations = Arc::new(AtomicUsize::new(0));
+    let hydrations = Arc::new(AtomicUsize::new(0));
+    let filter = MemFilter {
+        root: owned.path.clone(),
+        populations: populations.clone(),
+        hydrations: hydrations.clone(),
+    };
+    let connection = Session::new().connect_async(&owned.path, filter, execute as Executor)?;
+    crate::run_client(owned.path.to_str().context("unicode root")?)?;
+    anyhow::ensure!(
+        populations.load(Ordering::SeqCst) == 2,
+        "missing population callbacks"
+    );
+    anyhow::ensure!(
+        hydrations.load(Ordering::SeqCst) == 2,
+        "missing hydration callbacks"
+    );
     drop(connection);
-    sync_root_id.unregister().context("unregister")?;
-
-    fs::remove_dir_all(root).context("remove root dir")?;
-
+    owned.finish()?;
     Ok(())
 }

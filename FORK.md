@@ -73,38 +73,50 @@ cargo test --locked --all-targets --all-features
 cargo doc --locked --no-deps --all-features
 ```
 
-Import validation on native Windows x64: format, strict all-target/all-feature
-Clippy, all-target build/tests and documentation generation PASS. Actual Cloud
-Files provider behavior remains NOT_RUN.
-
-Five focused tests cover completed/non-polling executors, callback-context Weak
-ownership, malformed sync-root IDs and real idle Windows directory-watcher
-cancellation/handle release. These register no Cloud Files root and touch no
-Explorer/package state. The behavior executable reports NOT_RUN without opt-in;
-its zero exit in that state does not qualify provider behavior.
-
-On a separately authorized Windows desktop session only:
+Native requalification on 11 October 2026: six library tests and strict Clippy
+pass. Six native regression cases pass; one positive current-nonzero-USN gate is
+explicitly ignored in that suite and FAILS when enabled. See
+[issue 13/14 evidence](qualification/13-14-native.md). This is partial native
+qualification, not production approval. Cargo.lock is committed for repeatability.
 
 ```powershell
+# Existing owned directory, never a shared or production sync root:
+$env:SAMBAFIED_CF_TEST_PARENT = '<absolute-owned-fixture-parent>'
 $env:SAMBAFIED_RUN_CLOUD_FILTER_TESTS = '1'
-cargo test --locked --test behavior --all-features
-Remove-Item Env:SAMBAFIED_RUN_CLOUD_FILTER_TESTS
+cargo test --locked --all-targets --all-features -- --test-threads=1
+# Separate production gate; currently FAILS (fork #15):
+$env:SAMBAFIED_QUALIFY_CURRENT_USN = '1'
+cargo test --locked --test behavior --all-features -- current_nonzero_usn_acceptance
 ```
 
-This registers actual native roots and can make them visible in Explorer. It was
-not run during this import: the owner deferred shell/package acceptance until
-re-login. Failed roots/registrations stay for investigation; remove only the
-exact test identity after disconnect, never another provider/root. Examples are
-reference code requiring separate authorization and audit before execution.
-Hosted workflows are manual-only; no hosted CI was dispatched.
+The provider tests use a separate bounded client process to cause real population
+and hydration; a provider enumerating its own root did not trigger callbacks.
+The original three-entry/two-content assertions remain. Additional synchronous
+and asynchronous cases exercise empty completion and 128 entries in four pages.
+`FetchPlaceholders::pass_batch` supplies total count and explicit final-page state,
+returns native EntriesProcessed, and leaves per-entry result checking to callers.
+Only the final page disables on-demand population. Legacy pass remains one batch.
 
+USN arguments now pass addresses of live mutable values. Conversion's USN is an
+output, while mark-in-sync's USN is conditional input/output. Touched conversion,
+state and info methods reference a real Win32 handle for protected CFAPI handles.
+Remaining protected-handle/ownership paths require fork #16 audit. Native operation
+results are read from the mutated parameter union only after successful execution;
+request identity and other safety-epic requirements remain open.
+
+Owned registration guards unregister after disconnect on success and Rust unwind,
+verify exact identity/path and absence, and retain fixture bytes for diagnosis.
+Injected unwind is outside FFI. They do not prove panic containment across native
+callbacks. Remove only owned disposable fixtures after unregister checks. Examples
+remain reference code requiring separate audit. Hosted CI was not dispatched.
 ## Remaining product gates
 
 This is a reviewed wrapper import, not a complete sync engine or production
 qualification. Caller callbacks must not panic across native FFI. Further audit
 must cover callback panic/error paths, metadata/range edge cases, watcher
 overflow/recovery and reconnect, failure-retained context recovery, and remaining
-panic-prone convenience APIs. Native placeholder hydration/cancellation, pin/free
+panic-prone convenience APIs. Native hydration and directory population passed on the supplementary host;
+cancellation, pin/free
 space, logon/restart, signed package and Explorer menus/icons are still NOT_RUN
 for this fork. Authentication, writes/uploads, conflicts and durable recovery
 belong to the shared Sambafied engine.
