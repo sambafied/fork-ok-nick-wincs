@@ -84,22 +84,24 @@ impl Command for Write<'_> {
     }
 }
 
-impl Fallible for Write<'_> {
-    fn fail(
+impl Write<'_> {
+    /// Complete failed user I/O over the requested range; a zero-length range
+    /// overlaps no pending reads and cannot report their failure.
+    pub(crate) fn fail_range(
         connection_key: RawConnectionKey,
         transfer_key: RawTransferKey,
         error_kind: CloudErrorKind,
-    ) -> core::Result<Self::Result> {
+        offset: i64,
+        length: i64,
+    ) -> core::Result<()> {
         execute::<Self>(
             CF_OPERATION_PARAMETERS_0 {
                 TransferData: CF_OPERATION_PARAMETERS_0_0 {
                     Flags: CloudFilters::CF_OPERATION_TRANSFER_DATA_FLAG_NONE,
                     CompletionStatus: error_kind.into(),
-                    // TODO: SAME HERE AS BELOW?
-                    Buffer: [0; 1].as_mut_ptr() as *mut _,
-                    Offset: 0,
-                    // TODO: DOES THIS HAVE TO BE DEFINED?
-                    Length: 0,
+                    Buffer: std::ptr::null_mut(),
+                    Offset: offset,
+                    Length: length,
                 },
             },
             connection_key,
