@@ -1,78 +1,24 @@
-# Handover prompt — AEM desktop bridge
+# Fresh-session prompt: AEM desktop bridge
 
-Resume Development on `D:\projects\sambafied\desktop-client-adobe` and
-`D:\projects\sambafied\fork-ok-nick-wincs`. The user authorizes implementation,
-tests, signed commits, immediate pushes, PRs and eligible merges. No SaaS or
-release deployment is authorized. Read machine policy
-`C:\Users\maxbarrass\.codex\agent-worktree-policy.md`, repository AGENTS.md
-and indexed governance. Use New-AgentWorktree.ps1; preserve other workers.
+Develop the Rust AEM Desktop Bridge using the approved specifications, with Windows CFAPI and the maintained wincs fork as the primary filesystem backend. Support on-premises AEM and AEM as a Cloud Service. Deliver the original Adobe desktop application's workflows plus native Explorer folder access.
 
-## Delivered and next work
+Repositories:
 
-App PR 41 is merged into develop at
-`35509942e816a5aa4cbd8d47683bb4bd6a4d735a`; issue 39 is closed. Local AEM login,
-paginated DAM browsing and verified original downloads work through the CLI.
-Read `docs/dam-reads.md`, its recorded live evidence, and `assets.rs`, `reads.rs`,
-`session.rs`, `ipc.rs`. Prior app tests: thirteen passed. This handover reran
-the fork tests, not the app suite or live AEM acceptance.
+- Product: https://github.com/sambafied/desktop-client-adobe
+- Maintained wrapper: https://github.com/sambafied/fork-ok-nick-wincs
 
-The accompanying fork change adds explicit fallible disconnect. Seven library
-and thirteen native tests passed on 13 October, zero ignored; format, strict
-Clippy and rustdoc passed. See `qualification/7-disconnect.md`. Locate the
-merged `sambafied/7-fallible-disconnect` PR and verify its immutable merge SHA.
-Fork issue 7 remains open for failure injection and full recovery qualification.
+Start from current remote branches. Inspect code, open issues, repository instructions and normative specifications to establish current status. This prompt requires no previous chat, existing worktree, cached build, retained test fixture or running AEM instance.
 
-Next implement app issue 40 (parents 6/7, AEM-005/AEM-006). App still pins fork
-`5cb03aa9feb329e9c2d1799b5e3d8304c8f1714c`; repin to the verified merged SHA
-through an app PR before using the new API. Existing clean issue worktree:
-`D:\projects\sambafied\_worktrees\desktop-client-adobe\40-cfapi-dam`, branch
-`feature/40-cfapi-dam`, base above, no product edits. Owner: this chat's issue 40
-implementation; retain for pickup, remove after PR landing and closure checks.
-Refresh heads and ownership first. Issue 39's project Done reconciliation and
-issue 40's active project status were pending.
+Read the product's AGENTS.md, indexed governance, specification, architecture, compatibility contract, docs/cfapi-primary.md and docs/dam-reads.md. Declare Development and bind work to tracked requirements and issues.
 
-## CFAPI contract and acceptance
+Known delivered baseline to verify: product PR 41 implements local AEM login, paginated DAM browsing and verified original downloads through the CLI. Fork PR 19 adds observable fallible disconnect. Historical test evidence is in the repositories; rerun appropriate checks for the actual candidate and environment. The desktop UI and complete folder sync experience remain outstanding.
 
-Follow normative specs and `docs/cfapi-primary.md`. Use an owned empty NTFS
-folder bound to SID, profile, principal, Author and DAM root; refuse adoption
-of unrelated/nonempty/overlapping roots. Complete a bounded namespace before
-population. Hydrate verified originals on file reads, checking placeholder
-identity, remote observation, login epoch, cancellation and path boundaries.
-Never retain borrowed CFAPI pointers asynchronously or panic across FFI. Avoid
-state locks over HTTP/native waits and filter/store Arc cycles.
+Begin with product issue 40: connect DAM reads to an owned CFAPI sync root, populate folders and hydrate original assets when opened through the filesystem. Review the current fork pin and adopt a verified immutable merged revision when needed. Address remaining wrapper safety issues required by the app's runtime paths, including issue 7's failure and recovery matrix.
 
-Implement truthful connect/status/stop/unregister, with disconnect `Complete`
-before unregister and retained bytes/metadata on failure. No automatic
-overwrite, publication or eviction. Do not claim native read-only enforcement
-from DOS attributes. A bounded eager namespace with lazy binary hydration is
-a possible first slice, not implemented yet. Direct separate-process native
-enumeration/open/hash, logout, provider-down, reconnect and retention must pass.
+Implement identity-bound root ownership, safe paths, callback lifetimes, epoch and cancellation checks, observable connect/stop/unregister and retained bytes on failure. Unregister only after confirmed disconnect completion. Preserve unrelated and locally modified files. Verify native read-only enforcement before offering that mode. Avoid borrowed pointers across asynchronous work, panics across FFI and state locks over network or unbounded native operations.
 
-UI and full local folder sync are NOT ready. Edit tracking, uploads/publication,
-conflicts, pin/free-space, offline/restart/logon recovery, creative-app parity,
-package and Shell integration remain parent scope. Do not close full parity
-or safety gates from wrapper tests or initial local reads.
+Qualify real Windows folder enumeration, separate-process file opening and content hashes, logout, provider loss, reconnect and retained data. Establish a fresh isolated test environment and generated fixtures; discover available AEM test endpoints and use protected credential input. Request missing external access only when required while progressing independent work. Keep local AEM, SaaS, wrapper, creative-app and package acceptance distinct.
 
-## Retained AEM state
+Then work through the approved UI and sync backlog: browsing and connection UI, local edits, uploads/publication, conflicts, offline/restart recovery, pin/free-space controls, creative-app workflows and Windows package/Shell integration. Use original-app workflow qualification and approved specs as acceptance criteria. Complete bounded deliveries without claiming full parity prematurely.
 
-User-owned licensed local kit: `D:\projects\sambafied\_kits\aem`, JAR
-`cq-quickstart-6.6.0.jar`, Author `http://127.0.0.1:4502`. Check current health
-and process ownership. Never stop/delete user runtime. Enter credentials only
-through protected client input, never Git, chat, evidence, environment or argv.
-Launcher scopes java.io.tmpdir and jdk.net.unixdomain.tmpdir. Restart requires
-fresh login.
-
-Owned generated DAM fixture retained for issue 40 qualification:
-`/content/dam/bridge-qualification-f14b5d2b21874a31bbc78f2bd8dcd7c2`.
-Only `fixture.bin` and `second.bin`, each 131089 bytes, generated byte i modulo
-251, SHA256 `1EC3437CEE3CCCF3647E130524ADE52848571960A3340AE33573BEEF17D330B3`.
-Recheck exact children/hash/ownership before removing after native acceptance;
-never delete another subtree. Local AEM offered size/Last-Modified without
-ETag: weak read observation, no strong write concurrency guarantee.
-
-## Finish each delivery
-
-Commit signed, push immediately, create/attach PRs, self-review exact heads,
-merge eligible PRs, update issues/projects and preserve remaining limits.
-Remove owned targets/scratch before handoff; retain source only with owner,
-issue, reason and next cleanup trigger. Shared/user/runtime data survives.
+The user authorizes implementation, testing, signed commits, immediate pushes, PR creation and eligible merges. Follow repository and host worktree policies, preserve other workers and user data, and clean owned disposable output. Land product work through PRs into develop and wrapper work through PRs into main. Update docs, evidence and issues as behavior lands. Release deployment and production/SaaS mutations require separate authorization.
