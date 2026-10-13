@@ -2,12 +2,12 @@
 
 Develop the Rust AEM Desktop Bridge using the approved specifications, with Windows CFAPI and the maintained wincs fork as the primary filesystem backend. Support on-premises AEM and AEM as a Cloud Service. Deliver the original Adobe desktop application's workflows plus native Explorer folder access.
 
-Repositories:
+Use the existing repository clones, with paths relative to their shared parent:
 
-- Product: https://github.com/sambafied/desktop-client-adobe
-- Maintained wrapper: https://github.com/sambafied/fork-ok-nick-wincs
+- Product: `./desktop-client-adobe`
+- Maintained wrapper: `./fork-ok-nick-wincs`
 
-Start from current remote branches. Inspect code, open issues, repository instructions and normative specifications to establish current status. This prompt requires no previous chat, existing worktree, cached build, retained test fixture or running AEM instance.
+Work in these existing clones. Locate their shared parent from the current workspace, inspect Git status and ownership, and fetch current remote branches without disturbing local work. Inspect code, open issues, repository instructions and normative specifications to establish current status. This prompt requires no previous chat, existing issue worktree, cached build, retained test fixture or running AEM instance.
 
 Read the product's AGENTS.md, indexed governance, specification, architecture, compatibility contract, docs/cfapi-primary.md and docs/dam-reads.md. Declare Development and bind work to tracked requirements and issues.
 
