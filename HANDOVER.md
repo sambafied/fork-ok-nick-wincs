@@ -6,10 +6,13 @@ Use the existing repository clones, with paths relative to their shared parent:
 
 - Product: `./desktop-client-adobe`
 - Maintained wrapper: `./fork-ok-nick-wincs`
+- Copied local AEM kit: `./_kits/aem`
 
 Work in these existing clones. Locate their shared parent from the current workspace, inspect Git status and ownership, and fetch current remote branches without disturbing local work. Inspect code, open issues, repository instructions and normative specifications to establish current status. This prompt requires no previous chat, existing issue worktree, cached build, retained test fixture or running AEM instance.
 
 Read the product's AGENTS.md, indexed governance, specification, architecture, compatibility contract, docs/cfapi-primary.md and docs/dam-reads.md. Declare Development and bind work to tracked requirements and issues.
+
+For local AEM qualification, inspect `./_kits/aem` and its `start.ps1` launcher. Check whether the intended Author is already running before starting another process. If it is stopped, verify the available JAR, Java compatibility and launcher parameters, then start it headlessly from the shared parent with `& ./_kits/aem/start.ps1`. The launcher's default Author URL is `http://127.0.0.1:4502`; verify readiness, license state and authenticated DAM access separately before testing the bridge. Preserve the copied kit's repository, license, logs and runtime data. Enter credentials through protected client input; do not put them in Git, evidence or command arguments.
 
 Known delivered baseline to verify: product PR 41 implements local AEM login, paginated DAM browsing and verified original downloads through the CLI. Fork PR 19 adds observable fallible disconnect. Historical test evidence is in the repositories; rerun appropriate checks for the actual candidate and environment. The desktop UI and complete folder sync experience remain outstanding.
 
