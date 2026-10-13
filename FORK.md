@@ -33,6 +33,11 @@ promise. No dependency was added to the product repository.
 
 ## API migration
 
+`Connection::disconnect` now reports native failure, `WatcherStopping` or
+`Complete`. Wait for Complete before unregistering; Drop remains a fallback.
+See [bounded issue 7 qualification](qualification/7-disconnect.md) and the
+[AEM continuation prompt](HANDOVER.md). Issue 7's full failure matrix stays open.
+
 The donor reorganizes APIs: `root::SyncRootInfo` plus `SyncRootId::register`
 replaces `Registration`; metadata lives in `metadata`; handles and operations
 live in `placeholder`; `filter` exports `Request`, synchronous `SyncFilter` and

@@ -6,6 +6,7 @@ mod async_filter;
 mod handles;
 mod owned_root;
 mod population;
+mod shutdown;
 mod sync_filter;
 mod usn;
 
@@ -55,6 +56,9 @@ fn main() -> ExitCode {
     }
     let args = Arguments::from_args();
     let tests = vec![
+        Trial::test("fallible_disconnect_repeat_reconnect", || {
+            shutdown::test().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
         Trial::test("handle_method_matrix", || {
             handles::operations().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
         }),
