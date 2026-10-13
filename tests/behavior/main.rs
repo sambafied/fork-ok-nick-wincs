@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use libtest_mimic::{run, Arguments, Trial};
 
 mod async_filter;
+mod failure;
 mod handles;
 mod owned_root;
 mod population;
@@ -11,6 +12,14 @@ mod sync_filter;
 mod usn;
 
 fn main() -> ExitCode {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--expect-read-failure"))
+    {
+        return if std::fs::read(std::env::args_os().nth(2).expect("owned file")).is_err() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
     if std::env::args_os().nth(1).as_deref()
         == Some(std::ffi::OsStr::new("--verify-owned-registrations-absent"))
     {
@@ -56,6 +65,9 @@ fn main() -> ExitCode {
     }
     let args = Arguments::from_args();
     let tests = vec![
+        Trial::test("failed_recall_completes_pending_read", || {
+            failure::test().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
         Trial::test("fallible_disconnect_repeat_reconnect", || {
             shutdown::test().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
         }),

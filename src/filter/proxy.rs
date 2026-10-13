@@ -94,7 +94,14 @@ pub unsafe extern "system" fn fetch_data<T: SyncFilter + 'static>(
             return;
         };
 
-        if let Err(error) = command::Write::fail(connection_key, transfer_key, e) {
+        let range = (*params).Anonymous.FetchData;
+        if let Err(error) = command::Write::fail_range(
+            connection_key,
+            transfer_key,
+            e,
+            range.RequiredFileOffset,
+            range.RequiredLength,
+        ) {
             log::error!("Cannot report callback failure: {error}");
         }
     }
