@@ -7,7 +7,7 @@ below as history.
 
 ## Native finding: disconnect does not drain dispatched callbacks
 
-`disconnect_waits_for_inflight_callbacks` starts two separate-process reads of
+`disconnect_during_inflight_callbacks` starts two separate-process reads of
 cloud-only placeholders whose `fetch_data` callbacks each hold 1.5 s. With both
 callbacks running, `CfDisconnectSyncRoot` returned after 64–86 µs in four runs
 with both callbacks still executing. The prior wrapper freed its boxed callback
@@ -45,7 +45,7 @@ request timeout: 60.1–60.8 s observed.
 
 | Case | Test | Result |
 |---|---|---|
-| Disconnect during two concurrent slow recalls | `disconnect_waits_for_inflight_callbacks` | PASS: `CallbacksActive` while running, `Complete` 1.50 s later only after both exits, active count drained, repeat close stays `Complete`, reconnect and close |
+| Disconnect during two concurrent slow recalls | `disconnect_during_inflight_callbacks` | PASS: `CallbacksActive` while running, `Complete` 1.50 s later only after both exits, active count drained, repeat close stays `Complete`, reconnect and close |
 | Watcher spawn failure after native connect (injected) | `rollback_after_watcher_spawn_failure` | PASS: connect fails; control proves duplicate connect fails while connected; later connect succeeds, so rollback disconnected |
 | Native disconnect failure x2 (injected before the native call) | `failed_disconnect_retains_callbacks` | PASS: error `ERROR_CLOUD_FILE_REQUEST_TIMEOUT`, still connected, separate-process recall reaches the filter (27–29 ms), retry reaches `Complete`, repeat stays `Complete` |
 | Watcher panic (injected before any I/O) | `watcher_panic_is_sticky` | PASS: error on first and later close, native disconnect recorded, new connection succeeds |

@@ -67,8 +67,8 @@ fn main() -> ExitCode {
     let args = Arguments::from_args();
     #[allow(unused_mut)]
     let mut tests = vec![
-        Trial::test("disconnect_waits_for_inflight_callbacks", || {
-            lifecycle::disconnect_waits_for_inflight()
+        Trial::test("disconnect_during_inflight_callbacks", || {
+            lifecycle::disconnect_during_inflight()
                 .map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
         }),
         Trial::test("failed_recall_completes_pending_read", || {

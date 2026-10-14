@@ -1,7 +1,7 @@
 //! Opaque callback-context tokens and active-callback accounting.
 //!
 //! `CfDisconnectSyncRoot` does not wait for callbacks that are already
-//! dispatched (qualified by the `disconnect_waits_for_inflight_callbacks`
+//! dispatched (qualified by the `disconnect_during_inflight_callbacks`
 //! native test). A heap pointer passed as `CallbackContext` could therefore be
 //! read after it was freed. Instead the context value is a non-zero integer key
 //! into a process-wide registry of `Weak` filter references. The value is never

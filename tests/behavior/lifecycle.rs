@@ -126,7 +126,7 @@ fn close<F>(connection: &mut Connection<F>) -> Result<()> {
 /// Characterizes native disconnect against in-flight callbacks and qualifies
 /// the wrapper contract: Complete is reported only after every callback that
 /// resolved the filter has returned.
-pub fn disconnect_waits_for_inflight() -> Result<()> {
+pub fn disconnect_during_inflight() -> Result<()> {
     let mut root = crate::owned_root::OwnedRoot::new()?;
     let (sender, entered) = mpsc::channel();
     let filter = SlowFilter {
