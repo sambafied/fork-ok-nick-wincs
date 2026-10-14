@@ -5,6 +5,7 @@ use libtest_mimic::{run, Arguments, Trial};
 mod async_filter;
 mod failure;
 mod handles;
+mod lifecycle;
 mod owned_root;
 mod population;
 mod shutdown;
@@ -64,7 +65,12 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let args = Arguments::from_args();
-    let tests = vec![
+    #[allow(unused_mut)]
+    let mut tests = vec![
+        Trial::test("disconnect_waits_for_inflight_callbacks", || {
+            lifecycle::disconnect_waits_for_inflight()
+                .map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
         Trial::test("failed_recall_completes_pending_read", || {
             failure::test().map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
         }),
@@ -113,6 +119,21 @@ fn main() -> ExitCode {
                 .map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
         }),
     ];
+    #[cfg(feature = "fault-injection")]
+    tests.extend([
+        Trial::test("rollback_after_watcher_spawn_failure", || {
+            lifecycle::rollback_after_watcher_spawn_failure()
+                .map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
+        Trial::test("failed_disconnect_retains_callbacks", || {
+            lifecycle::failed_disconnect_retains_callbacks()
+                .map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
+        Trial::test("watcher_panic_is_sticky", || {
+            lifecycle::watcher_panic_is_sticky()
+                .map_err(|e| libtest_mimic::Failed::from(format!("{e:#}")))
+        }),
+    ]);
     run(&args, tests).exit_code()
 }
 

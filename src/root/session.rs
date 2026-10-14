@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         mpsc::{self, Sender, TryRecvError},
-        Arc, Weak,
+        Arc,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -15,7 +15,7 @@ use widestring::{U16CString, U16Str};
 use windows::{
     core::{self, PCWSTR},
     Win32::{
-        Foundation::{ERROR_IO_INCOMPLETE, HANDLE, WIN32_ERROR},
+        Foundation::{ERROR_IO_INCOMPLETE, E_INVALIDARG, HANDLE, WIN32_ERROR},
         Storage::{
             CloudFilters::{
                 self, CfConnectSyncRoot, CfDisconnectSyncRoot, CF_CONNECTION_KEY, CF_CONNECT_FLAGS,
@@ -30,14 +30,14 @@ use windows::{
 };
 
 use crate::{
-    filter::{self, AsyncBridge, Filter, SyncFilter},
-    root::connect::Connection,
+    filter::{self, AsyncBridge, ContextToken, Filter, SyncFilter},
+    root::{connect::Connection, fault::Faults},
     utility::LocalBoxFuture,
 };
 
 /// A builder to create a new connection for the sync root at the specified path.
 #[derive(Debug, Clone, Copy)]
-pub struct Session(CF_CONNECT_FLAGS);
+pub struct Session(CF_CONNECT_FLAGS, Faults);
 
 impl Session {
     /// Create a new [Session].
@@ -56,26 +56,37 @@ impl Session {
         self
     }
 
+    /// Binds a test-only [FaultPlan][crate::root::FaultPlan] to this session and
+    /// the connection it creates.
+    #[cfg(feature = "fault-injection")]
+    pub fn with_faults(mut self, plan: crate::root::FaultPlan) -> Self {
+        self.1 = Faults::new(plan);
+        self
+    }
+
     /// Initiates a connection to the sync root with the given [SyncFilter].
+    ///
+    /// A path containing NUL fails with `E_INVALIDARG`. If watcher creation
+    /// fails after the native connection exists, the connection is rolled back
+    /// and the callback context token is removed, so any late callback returns
+    /// without reaching the filter.
     pub fn connect<P, F>(self, path: P, filter: F) -> core::Result<Connection<F>>
     where
         P: AsRef<Path>,
         F: SyncFilter + 'static,
     {
+        let native_path = U16CString::from_os_str(path.as_ref())
+            .map_err(|_| core::Error::from_hresult(E_INVALIDARG))?;
         // Verify/open the watcher directory before connecting the provider.
         let directory = open_watch_directory(path.as_ref())?;
         let filter = Arc::new(filter);
         let callbacks = filter::callbacks::<F>();
-        let context = Box::new(Arc::downgrade(&filter));
+        let context = ContextToken::register(&filter);
         let key = unsafe {
             CfConnectSyncRoot(
-                PCWSTR(
-                    U16CString::from_os_str(path.as_ref())
-                        .expect("not contains nul")
-                        .as_ptr(),
-                ),
+                PCWSTR(native_path.as_ptr()),
                 callbacks.as_ptr(),
-                Some(context.as_ref() as *const Weak<F> as *const _),
+                Some(context.as_context()),
                 // This is enabled by default to remove the Option requirement around various fields of the
                 // [Request][crate::Request] struct
                 self.0
@@ -84,16 +95,27 @@ impl Session {
             )
         }?;
 
-        let (cancel_token, join_handle) =
-            match spawn_root_watcher(path.as_ref().to_path_buf(), directory, filter.clone()) {
-                Ok(watcher) => watcher,
-                Err(error) => {
-                    if unsafe { CfDisconnectSyncRoot(CF_CONNECTION_KEY(key.0)) }.is_err() {
-                        let _ = Box::into_raw(context);
-                    }
-                    return Err(error.into());
+        let watcher = if self.1.watcher_spawn() {
+            Err(std::io::Error::other("injected watcher spawn failure"))
+        } else {
+            spawn_root_watcher(
+                path.as_ref().to_path_buf(),
+                directory,
+                filter.clone(),
+                self.1.watcher_panic(),
+            )
+        };
+        let (cancel_token, join_handle) = match watcher {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                if let Err(rollback) = unsafe { CfDisconnectSyncRoot(CF_CONNECTION_KEY(key.0)) } {
+                    log::error!("Connect rollback could not disconnect: {rollback}");
                 }
-            };
+                // Removing the token is safe either way: late callbacks resolve nothing.
+                drop(context);
+                return Err(error.into());
+            }
+        };
 
         Ok(Connection::new(
             key.0,
@@ -102,6 +124,7 @@ impl Session {
             callbacks,
             filter,
             context,
+            self.1,
         ))
     }
 
@@ -123,7 +146,7 @@ impl Session {
 
 impl Default for Session {
     fn default() -> Self {
-        Self(CloudFilters::CF_CONNECT_FLAG_NONE)
+        Self(CloudFilters::CF_CONNECT_FLAG_NONE, Faults::default())
     }
 }
 
@@ -131,11 +154,17 @@ fn spawn_root_watcher<T: SyncFilter + 'static>(
     path: PathBuf,
     sync_root: File,
     filter: Arc<T>,
+    inject_panic: bool,
 ) -> std::io::Result<(Sender<()>, JoinHandle<()>)> {
     let (tx, rx) = mpsc::channel();
     let handle = thread::Builder::new()
         .name("wincs-root-watcher".into())
         .spawn(move || {
+            // Injected before any overlapped I/O, so unwinding frees no buffer
+            // the kernel could still write.
+            if inject_panic {
+                panic!("injected watcher panic");
+            }
             const CHANGE_BUF_SIZE: usize = 1024;
 
             let mut changes_buf = MaybeUninit::<[u32; CHANGE_BUF_SIZE / 4]>::zeroed();
@@ -254,7 +283,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let file = open_watch_directory(directory.path()).unwrap();
         let (stop, watcher) =
-            spawn_root_watcher(directory.path().into(), file, Arc::new(EmptyFilter)).unwrap();
+            spawn_root_watcher(directory.path().into(), file, Arc::new(EmptyFilter), false)
+                .unwrap();
         thread::sleep(Duration::from_millis(100));
         stop.send(()).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
