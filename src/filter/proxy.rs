@@ -1,7 +1,5 @@
 #![allow(clippy::missing_safety_doc)]
 
-use std::sync::{Arc, Weak};
-
 use windows::Win32::Storage::CloudFilters::{
     self, CF_CALLBACK_INFO, CF_CALLBACK_PARAMETERS, CF_CALLBACK_REGISTRATION,
 };
@@ -309,17 +307,18 @@ pub unsafe extern "system" fn notify_rename_completion<T: SyncFilter + 'static>(
 
 unsafe fn filter_from_info<T: SyncFilter + 'static>(
     info: *const CF_CALLBACK_INFO,
-) -> Option<Arc<T>> {
-    // The immutable Box<Weak<T>> is owned by Connection. Successful disconnect
-    // ends platform callbacks before it is freed. Each callback only borrows it.
-    let context = ((*info).CallbackContext as *const Weak<T>).as_ref()?;
-    context.upgrade()
+) -> Option<super::context::Active<T>> {
+    // CallbackContext is an opaque registry token, never dereferenced: native
+    // disconnect does not drain dispatched callbacks, so late callbacks must be
+    // able to observe a removed registration safely.
+    super::context::resolve::<T>((*info).CallbackContext)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::error::{CResult, CloudErrorKind};
+    use std::sync::Arc;
     struct EmptyFilter;
     impl SyncFilter for EmptyFilter {
         fn fetch_data(&self, _: Request, _: ticket::FetchData, _: info::FetchData) -> CResult<()> {
@@ -329,9 +328,9 @@ mod tests {
     #[test]
     fn callback_context_borrows_without_consuming_weak_ownership() {
         let filter = Arc::new(EmptyFilter);
-        let context = Box::new(Arc::downgrade(&filter));
+        let token = super::super::ContextToken::register(&filter);
         let info = CF_CALLBACK_INFO {
-            CallbackContext: context.as_ref() as *const Weak<EmptyFilter> as *mut _,
+            CallbackContext: token.as_context() as *mut _,
             ..Default::default()
         };
         for _ in 0..3 {
@@ -342,5 +341,18 @@ mod tests {
         for _ in 0..3 {
             assert!(unsafe { filter_from_info::<EmptyFilter>(&info) }.is_none());
         }
+    }
+
+    #[test]
+    fn callback_after_token_removal_resolves_nothing() {
+        let filter = Arc::new(EmptyFilter);
+        let token = super::super::ContextToken::register(&filter);
+        let info = CF_CALLBACK_INFO {
+            CallbackContext: token.as_context() as *mut _,
+            ..Default::default()
+        };
+        drop(token);
+        assert!(unsafe { filter_from_info::<EmptyFilter>(&info) }.is_none());
+        assert_eq!(Arc::weak_count(&filter), 0, "registry retained the filter");
     }
 }

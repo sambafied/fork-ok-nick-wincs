@@ -59,6 +59,9 @@ tempfile = "3"
 [features]
 # Enable globs in the `info::FetchPlaceholders` struct.
 globs = ["globset"]
+# Test-only deterministic fault plans for shutdown/recovery qualification.
+# Never enable in production consumers.
+fault-injection = []
 
 [[test]]
 harness = false

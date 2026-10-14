@@ -33,10 +33,16 @@ promise. No dependency was added to the product repository.
 
 ## API migration
 
-`Connection::disconnect` now reports native failure, `WatcherStopping` or
-`Complete`. Wait for Complete before unregistering; Drop remains a fallback.
-See [bounded issue 7 qualification](qualification/7-disconnect.md) and the
-[AEM continuation prompt](HANDOVER.md). Issue 7's full failure matrix stays open.
+`Connection::disconnect` reports native failure, `CallbacksActive`,
+`WatcherStopping` or `Complete`. `CallbacksActive` is new: match it (or treat
+every non-Complete status as "poll again"). Wait for Complete before
+unregistering; Drop remains a fallback. `Connection::active_callbacks()` and
+`is_connected()` expose shutdown state. Native disconnect does **not** drain
+dispatched callbacks: fail or finish in-flight work and wait for
+`active_callbacks() == 0` before disconnecting, or readers of orphaned callbacks
+block for the platform's 60-second request timeout. See the
+[issue 7 failure matrix](qualification/7-disconnect.md) and the
+[AEM continuation prompt](HANDOVER.md).
 
 The donor reorganizes APIs: `root::SyncRootInfo` plus `SyncRootId::register`
 replaces `Registration`; metadata lives in `metadata`; handles and operations
@@ -50,11 +56,13 @@ must be updated. `SyncRootId::to_components` remains fallible. The legacy static
 
 - Async executor results use initialized Option state: an executor that does not
   complete its future returns NotSupported, never uninitialized memory.
-- Callback context is one immutable boxed Weak owned by Connection. Callbacks
-  borrow it, without taking raw Weak ownership repeatedly. Successful disconnect
-  ends native callbacks before context release. A failed disconnect deliberately
-  retains the small Weak context, avoiding a dangling pointer; it logs the error.
-- Watcher directory opens before provider connection. Thread-spawn failure rolls
+- `CallbackContext` is an opaque integer token into a process-wide registry of
+  Weak filter references, never a dereferenced pointer. The previous boxed-Weak
+  pointer relied on disconnect ending callbacks, which the native suite
+  disproved (issue 7). Removing a token is always safe; late callbacks resolve
+  no filter and return. Resolved callbacks hold a counted guard.
+- Watcher directory opens before provider connection. A NUL in the root path
+  returns E_INVALIDARG instead of panicking. Thread-spawn failure rolls
   back the connection. Cancellation drains overlapped I/O before its buffer and
   OVERLAPPED can be destroyed. The notification buffer is DWORD-aligned.
 - Connection drop does not panic on disconnect failure and limits its watcher
