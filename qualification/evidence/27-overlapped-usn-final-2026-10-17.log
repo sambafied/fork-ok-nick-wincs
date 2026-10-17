@@ -1,0 +1,159 @@
+   Compiling aho-corasick v1.1.5
+   Compiling regex-syntax v0.8.11
+   Compiling regex-automata v0.4.18
+   Compiling bstr v1.13.1
+   Compiling globset v0.4.20
+   Compiling wincs v0.1.0 (D:\projects\sambafied\_worktrees\fork-ok-nick-wincs\27-overlapped-usn)
+    Finished `test` profile [unoptimized] target(s) in 14.25s
+     Running unittests src\lib.rs (.tmp\27-build\x86_64-pc-windows-msvc\debug\deps\wincs-54aa04d1c3b0e485.exe)
+
+running 12 tests
+test command::executor::tests::returns_native_output_and_preserves_failure ... ok
+test filter::async_filter::tests::executor_returns_the_completed_result ... ok
+test filter::async_filter::tests::executor_that_does_not_poll_returns_error ... ok
+test filter::context::tests::active_count_tracks_guards_beyond_token_removal ... ok
+test filter::context::tests::dropped_filter_does_not_resolve ... ok
+test filter::context::tests::token_resolves_until_dropped_and_never_after ... ok
+test filter::proxy::tests::callback_after_token_removal_resolves_nothing ... ok
+test filter::proxy::tests::callback_context_borrows_without_consuming_weak_ownership ... ok
+test placeholder::tests::hydration_ranges_use_length_and_reject_overflow ... ok
+test placeholder::tests::usn_parser_rejects_truncation_malformed_length_version_and_zero_usn ... ok
+test root::session::tests::idle_native_directory_watcher_cancels_and_releases_directory ... ok
+test root::sync_root_id::tests::identifiers_parse_without_panics ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests\behavior\main.rs (.tmp\27-build\x86_64-pc-windows-msvc\debug\deps\behavior-72dac245aba3f643.exe)
+
+running 19 tests
+test disconnect_during_inflight_callbacks    ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-eP96Rb
+NATIVE: in-flight callbacks 2; first disconnect returned after 61.6µs with 2 still running; status CallbacksActive
+Complete 1.5050099s after first disconnect
+NATIVE: readers of callbacks orphaned by disconnect returned after 60.3882582s
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-eP96Rb
+ok
+test failed_recall_completes_pending_read    ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-bFcCTQ
+failed recall returned error in 26.0765ms
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-bFcCTQ
+ok
+test fallible_disconnect_repeat_reconnect    ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-pttjof
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-pttjof
+ok
+test handle_method_matrix                    ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-w7MJBb
+opening exclusive range handle: protected=false
+range handle open, marking fixture in sync
+issuing nonempty range update
+range update returned, querying ranges
+range queries returned, closing exclusive
+ordinary/protected method matrix PASS: protected=false
+opening exclusive range handle: protected=true
+range handle open, marking fixture in sync
+issuing nonempty range update
+range update returned, querying ranges
+range queries returned, closing exclusive
+ordinary/protected method matrix PASS: protected=true
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-w7MJBb
+ok
+test handle_ownership                        ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-OGmeVq
+reference clones/owner drop and 128 File transfers PASS; handles 431->431; protected File rejected without revert
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-OGmeVq
+ok
+test acknowledgement_busy_and_mapped         ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-4KcrAk
+open writer and surviving writable view reject barrier; mapped bytes retained: The process cannot access the file because it is being used by another process. (0x80070020)
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-4KcrAk
+ok
+test protected_oplock_break                  ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-HxHKLu
+oplock break delayed through last clone; 128 failed acquisitions return E_HANDLE without leak
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-HxHKLu
+ok
+test sync_filter                             ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-k7eKnL
+fetch_placeholders: path: "C:\\Users\\maxbarrass\\Sambafied Wincs27 Qualification\\sambafied-cf-test-k7eKnL", relative path: ""
+fetch_placeholders: path: "C:\\Users\\maxbarrass\\Sambafied Wincs27 Qualification\\sambafied-cf-test-k7eKnL\\dir1", relative path: "dir1"
+fetch_data: path: "test1.txt"
+fetch_data: path: "dir1\\test2.txt"
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-k7eKnL
+ok
+test async_filter                            ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-eSpcKF
+fetch_placeholders: path: "C:\\Users\\maxbarrass\\Sambafied Wincs27 Qualification\\sambafied-cf-test-eSpcKF", relative path: ""
+fetch_placeholders: path: "C:\\Users\\maxbarrass\\Sambafied Wincs27 Qualification\\sambafied-cf-test-eSpcKF\\dir1", relative path: "dir1"
+fetch_data: path: "test1.txt"
+fetch_data: path: "dir1\\test2.txt"
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-eSpcKF
+ok
+test sync_paged_empty                        ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-FEY6DM
+population callback: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-FEY6DM
+population : 2/2 processed in 1 pages
+population callback: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-FEY6DM\empty
+population empty: 0/0 processed in 0 pages
+population callback: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-FEY6DM\paged
+population paged: 128/128 processed in 4 pages
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-FEY6DM
+ok
+test async_paged_empty                       ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-PUelXt
+population callback: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-PUelXt
+population : 2/2 processed in 1 pages
+population callback: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-PUelXt\empty
+population empty: 0/0 processed in 0 pages
+population callback: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-PUelXt\paged
+population paged: 128/128 processed in 4 pages
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-PUelXt
+ok
+test asynchronous_usn_metadata_warm_and_cold ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-7aYbD2
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-7aYbD2
+warm protected / cold attributes-only asynchronous USN metadata PASS; 0 hydration callbacks, unchanged cold attributes
+ok
+test usn_pointer_output_and_stale_generation ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-aJXKLb
+conversion output=0; output zero is not a concurrency token
+RAW_USN_UNSUPPORTED dirty-to-clean: wrapper=The file is not in sync with the cloud. (0x80070179); direct control same error
+stale identity/USN rejected, later generation remains dirty
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-aJXKLb
+ok
+test exclusive_generation_acknowledgement    ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-DxdGf9
+conversion output=0; output zero is not a concurrency token
+exclusive acknowledgement PASS: expected FileGeneration { volume: 13321779784657134674, file_id: [219, 156, 59, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0], usn: 89439653168 }; acknowledged FileGeneration { volume: 13321779784657134674, file_id: [219, 156, 59, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0], usn: 89439653248 }
+conversion output=0; output zero is not a concurrency token
+replacement identity rejected
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-DxdGf9
+ok
+test acknowledgement_competing_writer        ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-Uc3qqK
+conversion output=0; output zero is not a concurrency token
+competing writer waited for barrier, N+1 then dirtied and survived
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-Uc3qqK
+ok
+test registration_cleanup_after_unwind       ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-ncf3Dp
+
+thread 'main' (11636) panicked at tests\behavior\owned_root.rs:162:9:
+injected test failure outside native callback
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-ncf3Dp
+ok
+test rollback_after_watcher_spawn_failure    ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-fjrMWC
+injected spawn failure reported: Catastrophic failure (0x8000FFFF)
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-fjrMWC
+ok
+test failed_disconnect_retains_callbacks     ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-W97zvf
+recall after failed disconnect completed in 28.8913ms
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-W97zvf
+ok
+test watcher_panic_is_sticky                 ... registered owned fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-cBVnw2
+
+thread 'wincs-root-watcher' (35804) panicked at src\root\session.rs:166:17:
+injected watcher panic
+watcher panic reported: Catastrophic failure (0x8000FFFF)
+registration absent; retained fixture: C:\Users\maxbarrass\Sambafied Wincs27 Qualification\sambafied-cf-test-cBVnw2
+ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 68.79s
+
+     Running unittests examples\cloud-mirror.rs (.tmp\27-build\x86_64-pc-windows-msvc\debug\examples\cloud_mirror-2d0f84f0c33c4bfa.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests examples\sftp.rs (.tmp\27-build\x86_64-pc-windows-msvc\debug\examples\sftp-bfb74828c8beed4b.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

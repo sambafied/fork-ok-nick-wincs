@@ -54,3 +54,15 @@ registration must be verified absent before deleting generated fixtures. Normal
 client roots, the hung app root, normal package and AEM processes were untouched.
 App pin update, app check-in acceptance and supported-platform qualification are
 separate from this fork's bounded repair.
+
+Final coordinator rerun on 511430734672414619cc0c1579423579e4fd3e6d:
+`cargo +1.98.1 test --locked --all-targets --all-features -j1` with incremental
+0 and the same codegen/build override1/debug0 profile completed exit0. Library
+12 PASS, native19 PASS/0 ignored in68.79seconds, including exact-generation
+acknowledgement, competing writers, writable mappings, cold metadata/no recall,
+handle ownership, population, disconnect and injected lifecycle failure cases.
+The earlier18/1 run remains preserved above. One intervening worker tool session
+lost its final result; it is NOT_RUN/unknown outcome evidence, never a green run.
+The final rerun was captured durably with exit/head JSON before interpretation.
+See [final local transcript](evidence/27-overlapped-usn-final-2026-10-17.log).
+No CI or global process/service/package changes were used.
