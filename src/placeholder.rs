@@ -7,6 +7,7 @@ use std::{
     path::Path,
     ptr,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use widestring::U16CString;
@@ -14,8 +15,9 @@ use windows::{
     core::{self, PCWSTR},
     Win32::{
         Foundation::{
-            CloseHandle, ERROR_CLOUD_FILE_NOT_IN_SYNC, ERROR_NOT_A_CLOUD_FILE, E_HANDLE,
-            E_INVALIDARG, E_UNEXPECTED, HANDLE,
+            CloseHandle, ERROR_CLOUD_FILE_NOT_IN_SYNC, ERROR_IO_INCOMPLETE, ERROR_IO_PENDING,
+            ERROR_NOT_A_CLOUD_FILE, ERROR_TIMEOUT, E_HANDLE, E_INVALIDARG, E_UNEXPECTED, HANDLE,
+            WAIT_OBJECT_0, WAIT_TIMEOUT,
         },
         Storage::CloudFilters::{
             self, CfCloseHandle, CfConvertToPlaceholder, CfGetPlaceholderInfo,
@@ -28,7 +30,8 @@ use windows::{
         Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO},
         System::{
             Ioctl::{FSCTL_READ_FILE_USN_DATA, READ_FILE_USN_DATA, USN_RECORD_V2},
-            IO::DeviceIoControl,
+            Threading::{CreateEventW, WaitForSingleObject},
+            IO::{CancelIoEx, DeviceIoControl, GetOverlappedResult, OVERLAPPED},
         },
     },
 };
@@ -678,6 +681,142 @@ impl UploadAcknowledgement {
     }
 }
 
+// One stable allocation owns every pointer passed to the asynchronous kernel
+// request. The caller retains its protected Win32 reference until this returns.
+struct UsnIo {
+    input: READ_FILE_USN_DATA,
+    output: [u64; 512],
+    overlapped: OVERLAPPED,
+    returned: u32,
+}
+struct UsnRequest {
+    handle: HANDLE,
+    io: Box<UsnIo>,
+    event: HANDLE,
+    pending: bool,
+}
+impl UsnRequest {
+    fn new(handle: HANDLE) -> core::Result<Self> {
+        let event = unsafe { CreateEventW(None, true, false, None) }?;
+        Ok(Self {
+            handle,
+            event,
+            pending: false,
+            io: Box::new(UsnIo {
+                input: READ_FILE_USN_DATA {
+                    MinMajorVersion: 2,
+                    MaxMajorVersion: 2,
+                },
+                output: [0; 512],
+                overlapped: OVERLAPPED {
+                    hEvent: event,
+                    ..Default::default()
+                },
+                returned: 0,
+            }),
+        })
+    }
+    fn read(&mut self, deadline: Instant) -> core::Result<u32> {
+        // Mark active before entering the syscall: all exits, including timeout,
+        // must drain before OVERLAPPED/input/output/event memory can be freed.
+        self.pending = true;
+        let started = unsafe {
+            DeviceIoControl(
+                self.handle,
+                FSCTL_READ_FILE_USN_DATA,
+                Some(ptr::from_ref(&self.io.input).cast()),
+                mem::size_of_val(&self.io.input) as u32,
+                Some(self.io.output.as_mut_ptr().cast()),
+                mem::size_of_val(&self.io.output) as u32,
+                Some(&mut self.io.returned),
+                Some(&mut self.io.overlapped),
+            )
+        };
+        match started {
+            Ok(()) => {
+                // Immediate completion also covers ordinary synchronous Win32
+                // handles, for which the kernel ignores OVERLAPPED entirely.
+                self.pending = false;
+                return Ok(self.io.returned);
+            }
+            Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+            Err(error) => {
+                self.pending = false;
+                return Err(error);
+            }
+        }
+        loop {
+            match unsafe {
+                GetOverlappedResult(
+                    self.handle,
+                    &self.io.overlapped,
+                    &mut self.io.returned,
+                    false,
+                )
+            } {
+                Ok(()) => {
+                    self.pending = false;
+                    return Ok(self.io.returned);
+                }
+                Err(error) if error.code() == ERROR_IO_INCOMPLETE.to_hresult() => {}
+                Err(error) => {
+                    self.pending = false;
+                    return Err(error);
+                }
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(ERROR_TIMEOUT.into());
+            }
+            let wait = unsafe {
+                WaitForSingleObject(self.event, remaining.as_millis().clamp(1, 100) as u32)
+            };
+            if wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT {
+                return Err(core::Error::from_thread());
+            }
+        }
+    }
+}
+impl Drop for UsnRequest {
+    fn drop(&mut self) {
+        if self.pending {
+            unsafe {
+                // CancelIoEx is only a request. Completion can race cancellation;
+                // either success or terminal cancellation must be observed before
+                // releasing any buffers or the caller's protected reference.
+                let _ = CancelIoEx(self.handle, Some(&self.io.overlapped));
+                loop {
+                    match GetOverlappedResult(
+                        self.handle,
+                        &self.io.overlapped,
+                        &mut self.io.returned,
+                        true,
+                    ) {
+                        Err(error) if error.code() == ERROR_IO_INCOMPLETE.to_hresult() => continue,
+                        _ => break,
+                    }
+                }
+            }
+        }
+        unsafe {
+            let _ = CloseHandle(self.event);
+        }
+    }
+}
+fn parse_usn(buffer: &[u64], returned: usize) -> core::Result<Usn> {
+    if returned < mem::size_of::<USN_RECORD_V2>() || returned > mem::size_of_val(buffer) {
+        return Err(E_UNEXPECTED.into());
+    }
+    let record = unsafe { &*buffer.as_ptr().cast::<USN_RECORD_V2>() };
+    if record.MajorVersion != 2
+        || record.Usn <= 0
+        || (record.RecordLength as usize) < mem::size_of::<USN_RECORD_V2>()
+        || record.RecordLength as usize > returned
+    {
+        return Err(E_UNEXPECTED.into());
+    }
+    Ok(record.Usn)
+}
 fn generation_for_handle(handle: HANDLE) -> core::Result<FileGeneration> {
     let mut identity = FILE_ID_INFO::default();
     unsafe {
@@ -688,35 +827,15 @@ fn generation_for_handle(handle: HANDLE) -> core::Result<FileGeneration> {
             mem::size_of::<FILE_ID_INFO>() as u32,
         )
     }?;
-    let input = READ_FILE_USN_DATA {
-        MinMajorVersion: 2,
-        MaxMajorVersion: 2,
-    };
-    let mut buffer = [0u64; 512];
-    let mut returned = 0;
-    unsafe {
-        DeviceIoControl(
-            handle,
-            FSCTL_READ_FILE_USN_DATA,
-            Some(ptr::from_ref(&input).cast()),
-            mem::size_of_val(&input) as u32,
-            Some(buffer.as_mut_ptr().cast()),
-            mem::size_of_val(&buffer) as u32,
-            Some(&mut returned),
-            None,
-        )
-    }?;
-    if (returned as usize) < mem::size_of::<USN_RECORD_V2>() {
-        return Err(E_UNEXPECTED.into());
-    }
-    let record = unsafe { &*buffer.as_ptr().cast::<USN_RECORD_V2>() };
-    if record.MajorVersion != 2 || record.Usn <= 0 {
-        return Err(E_UNEXPECTED.into());
-    }
+    // This is a logical deadline, not permission to free active I/O. Cancellation
+    // drains synchronously on Drop; a faulty driver can exceed the deadline.
+    let mut request = UsnRequest::new(handle)?;
+    let returned = request.read(Instant::now() + Duration::from_secs(10))?;
+    let usn = parse_usn(&request.io.output, returned as usize)?;
     Ok(FileGeneration {
         volume: identity.VolumeSerialNumber,
         file_id: identity.FileId.Identifier,
-        usn: record.Usn,
+        usn,
     })
 }
 
@@ -966,7 +1085,7 @@ impl Placeholder {
     //     };
 
     //     match state {
-    //         CloudFilters::CF_PLACEHOLDER_STATE_INVALID => Err(core::Error::from_win32()),
+    //         CloudFilters::CF_PLACEHOLDER_STATE_INVALID => Err(core::Error::from_thread()),
     //         CloudFilters::CF_PLACEHOLDER_STATE_NO_STATES => Ok(None),
     //         s => Ok(Some(PlaceholderState(s))),
     //     }
@@ -1085,5 +1204,33 @@ mod tests {
         assert!(hydration_range(..=u64::MAX).is_err());
         assert!(FileGeneration::from_parts(1, [1; 16], 0).is_err());
         assert!(FileGeneration::from_parts(1, [1; 16], -1).is_err());
+    }
+    #[test]
+    fn usn_parser_rejects_truncation_malformed_length_version_and_zero_usn() {
+        let mut buffer = [0u64; 512];
+        let size = mem::size_of::<USN_RECORD_V2>();
+        let record = unsafe { &mut *buffer.as_mut_ptr().cast::<USN_RECORD_V2>() };
+        record.RecordLength = size as u32;
+        record.MajorVersion = 2;
+        record.Usn = 42;
+        assert_eq!(parse_usn(&buffer, size).unwrap(), 42);
+        assert!(parse_usn(&buffer, size - 1).is_err());
+        assert!(parse_usn(&buffer, mem::size_of_val(&buffer) + 1).is_err());
+        unsafe {
+            (*buffer.as_mut_ptr().cast::<USN_RECORD_V2>()).RecordLength = (size + 1) as u32;
+        }
+        assert!(parse_usn(&buffer, size).is_err());
+        unsafe {
+            let record = &mut *buffer.as_mut_ptr().cast::<USN_RECORD_V2>();
+            record.RecordLength = size as u32;
+            record.MajorVersion = 3;
+        }
+        assert!(parse_usn(&buffer, size).is_err());
+        unsafe {
+            let record = &mut *buffer.as_mut_ptr().cast::<USN_RECORD_V2>();
+            record.MajorVersion = 2;
+            record.Usn = 0;
+        }
+        assert!(parse_usn(&buffer, size).is_err());
     }
 }

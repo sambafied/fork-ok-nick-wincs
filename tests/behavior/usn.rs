@@ -177,3 +177,114 @@ pub fn competing_writer() -> Result<()> {
     ensure!(fs::read(&path)? == b"generation N+1");
     Ok(())
 }
+
+/// Protected handles are asynchronous; USN metadata queries must use a valid
+/// OVERLAPPED on both warm ordinary files and untouched cold placeholders.
+pub fn asynchronous_metadata() -> Result<()> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use wincs::{
+        error::{CResult, CloudErrorKind},
+        filter::{info, ticket, Request, SyncFilter},
+        metadata::Metadata,
+        placeholder_file::PlaceholderFile,
+    };
+    struct MetadataFilter(Arc<AtomicUsize>);
+    impl SyncFilter for MetadataFilter {
+        fn fetch_data(&self, _: Request, _: ticket::FetchData, _: info::FetchData) -> CResult<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(CloudErrorKind::NotSupported)
+        }
+        fn fetch_placeholders(
+            &self,
+            _: Request,
+            ticket: ticket::FetchPlaceholders,
+            _: info::FetchPlaceholders,
+        ) -> CResult<()> {
+            ticket
+                .pass_batch(&mut [], 0, true)
+                .map(|_| ())
+                .map_err(|_| CloudErrorKind::Unsuccessful)
+        }
+    }
+    let mut owned = crate::owned_root::OwnedRoot::new()?;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let connection =
+        wincs::root::Session::new().connect(&owned.path, MetadataFilter(calls.clone()))?;
+    let warm = owned.path.join("warm-metadata.txt");
+    fs::write(&warm, b"owned metadata fixture")?;
+    let expected = observe(&warm)?;
+    for _ in 0..32 {
+        let placeholder = Placeholder::options()
+            .foreground()
+            .open(&warm)
+            .context("warm protected open")?;
+        ensure!(
+            placeholder.generation().context("warm overlapped USN")? == expected,
+            "Protected USN observation changed without edit"
+        );
+    }
+    PlaceholderFile::new("cold-metadata.bin")
+        .metadata(Metadata::file().size(131089))
+        .blob(b"owned-cold-usn-metadata".to_vec())
+        .create(&owned.path)?;
+    let cold = owned.path.join("cold-metadata.bin");
+    let before = fs::symlink_metadata(&cold)?;
+    ensure!(
+        before.file_attributes() & (0x1000 | 0x40000 | 0x400000) != 0,
+        "Cold fixture unexpectedly resident"
+    );
+    ensure!(
+        calls.load(Ordering::SeqCst) == 0,
+        "Fixture creation unexpectedly recalled content before metadata probe"
+    );
+    let first = {
+        let placeholder = Placeholder::from(
+            fs::OpenOptions::new()
+                .access_mode(0x80)
+                .share_mode(7)
+                .custom_flags(0x00200000 | 0x40000000)
+                .open(&cold)
+                .context("cold asynchronous attributes-only open")?,
+        );
+        let generation = placeholder
+            .generation()
+            .context("cold first overlapped USN")?;
+        ensure!(placeholder.info()?.context("cold metadata")?.blob() == b"owned-cold-usn-metadata");
+        generation
+    };
+    for _ in 0..32 {
+        let placeholder = Placeholder::from(
+            fs::OpenOptions::new()
+                .access_mode(0x80)
+                .share_mode(7)
+                .custom_flags(0x00200000 | 0x40000000)
+                .open(&cold)
+                .context("cold asynchronous attributes-only open")?,
+        );
+        ensure!(
+            placeholder
+                .generation()
+                .context("cold repeat overlapped USN")?
+                == first,
+            "Cold USN changed without content access"
+        );
+    }
+    let after = fs::symlink_metadata(&cold)?;
+    ensure!(
+        before.file_attributes() == after.file_attributes() && before.len() == after.len(),
+        "Metadata query changed residency/length"
+    );
+    ensure!(
+        calls.load(Ordering::SeqCst) == 0,
+        "USN metadata query recalled cold content"
+    );
+    drop(connection);
+    owned.finish()?;
+    ensure!(fs::read(&warm)? == b"owned metadata fixture");
+    println!("warm protected / cold attributes-only asynchronous USN metadata PASS; 0 hydration callbacks, unchanged cold attributes");
+    Ok(())
+}

@@ -103,6 +103,10 @@ fn main() -> ExitCode {
             population::test(true)
                 .map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
         }),
+        Trial::test("asynchronous_usn_metadata_warm_and_cold", || {
+            usn::asynchronous_metadata()
+                .map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
+        }),
         Trial::test("usn_pointer_output_and_stale_generation", || {
             usn::test().map_err(|error| libtest_mimic::Failed::from(format!("{error:#}")))
         }),
