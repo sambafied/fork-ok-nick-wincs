@@ -39,7 +39,15 @@ Sources: [CfOpenFileWithOplock](https://learn.microsoft.com/en-us/windows/win32/
 - Initial compiler attempt crashed in windows-interface before compiling changed
   source (STATUS_ACCESS_VIOLATION). The bounded same-toolchain serial/debug0 pass
   above completed. No toolchain cycling or CI was used.
-- Full native regression result is recorded below after execution.
+- Full native suite: 18 PASS, 1 FAIL, zero ignored, 69.10 seconds. The existing
+  exclusive_generation_acknowledgement case failed closed with native oplock-busy
+  0x80070322. A single isolated rerun of that same unchanged test passed (0.53
+  seconds), including exact-generation acknowledgement and replacement-identity
+  refusal. The aggregate run remains FAIL; the isolated PASS does not rewrite it.
+  Competing-writer, surviving writable mapping, handle ownership, stale generation,
+  async/sync population, shutdown and fault-injection cases passed in the run.
+  Existing native disconnect characterization observed 60.297 seconds for orphaned
+  readers, with callbacks already drained at 1.508 seconds; this is not a USN hang.
 
 Native fixtures belong only to the issue-27 unique C: test parent. Every exact
 registration must be verified absent before deleting generated fixtures. Normal
