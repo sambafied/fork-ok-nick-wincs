@@ -17,9 +17,7 @@ use windows::{
     Win32::{
         Foundation::{ERROR_IO_INCOMPLETE, E_INVALIDARG, HANDLE, WIN32_ERROR},
         Storage::{
-            CloudFilters::{
-                self, CfConnectSyncRoot, CfDisconnectSyncRoot, CF_CONNECTION_KEY, CF_CONNECT_FLAGS,
-            },
+            CloudFilters::{self, CfConnectSyncRoot, CF_CONNECT_FLAGS},
             FileSystem::{
                 ReadDirectoryChangesW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED,
                 FILE_LIST_DIRECTORY, FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_INFORMATION,
@@ -34,6 +32,54 @@ use crate::{
     root::{connect::Connection, fault::Faults},
     utility::LocalBoxFuture,
 };
+
+/// Error plus genuine partial native ownership. A watcher-spawn failure after
+/// successful native connect retains the SAME Connection; the caller must
+/// explicitly drain it. Dropping an error uses only Connection's legacy fallback.
+#[must_use = "transfer the retained connection to its original shutdown owner"]
+pub struct ConnectFailure<F> {
+    error: core::Error,
+    connection: Option<Box<Connection<F>>>,
+}
+impl<F> ConnectFailure<F> {
+    fn before_connect(error: core::Error) -> Self {
+        Self {
+            error,
+            connection: None,
+        }
+    }
+    /// Original native or watcher-start error, independent of shutdown outcome.
+    pub fn error(&self) -> &core::Error {
+        &self.error
+    }
+    /// Whether this error owns a genuine successful native-connect return.
+    pub fn has_connection(&self) -> bool {
+        self.connection.is_some()
+    }
+    /// Transfers genuine ownership once; never reconstructs a native key.
+    pub fn into_parts(self) -> (core::Error, Option<Connection<F>>) {
+        (self.error, self.connection.map(|connection| *connection))
+    }
+}
+impl<F> std::fmt::Debug for ConnectFailure<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectFailure")
+            .field("code", &self.error.code())
+            .field("retained_connection", &self.connection.is_some())
+            .finish()
+    }
+}
+impl<F> std::fmt::Display for ConnectFailure<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Native connect failed ({:#010x}); retained connection: {}",
+            self.error.code().0,
+            self.connection.is_some()
+        )
+    }
+}
+impl<F> std::error::Error for ConnectFailure<F> {}
 
 /// A builder to create a new connection for the sync root at the specified path.
 #[derive(Debug, Clone, Copy)]
@@ -75,10 +121,37 @@ impl Session {
         P: AsRef<Path>,
         F: SyncFilter + 'static,
     {
+        match self.connect_retained(path, filter) {
+            Ok(connection) => Ok(connection),
+            Err(failure) => {
+                let (error, retained) = failure.into_parts();
+                if let Some(mut connection) = retained {
+                    if let Err(rollback) = connection.disconnect() {
+                        log::error!("Connect rollback could not disconnect: {rollback}");
+                    }
+                    // Legacy return type cannot transfer partial ownership.
+                    // Its existing documented bounded Drop fallback remains.
+                }
+                Err(error)
+            }
+        }
+    }
+    /// Connect while retaining genuine partial ownership on watcher failure.
+    /// No rollback/drop occurs on the retained error path. Callers must take
+    /// the actual Connection from ConnectFailure and explicitly shut it down.
+    pub fn connect_retained<P, F>(
+        self,
+        path: P,
+        filter: F,
+    ) -> std::result::Result<Connection<F>, ConnectFailure<F>>
+    where
+        P: AsRef<Path>,
+        F: SyncFilter + 'static,
+    {
         let native_path = U16CString::from_os_str(path.as_ref())
-            .map_err(|_| core::Error::from_hresult(E_INVALIDARG))?;
-        // Verify/open the watcher directory before connecting the provider.
-        let directory = open_watch_directory(path.as_ref())?;
+            .map_err(|_| ConnectFailure::before_connect(core::Error::from_hresult(E_INVALIDARG)))?;
+        let directory = open_watch_directory(path.as_ref())
+            .map_err(|error| ConnectFailure::before_connect(error.into()))?;
         let filter = Arc::new(filter);
         let callbacks = filter::callbacks::<F>();
         let context = ContextToken::register(&filter);
@@ -87,45 +160,34 @@ impl Session {
                 PCWSTR(native_path.as_ptr()),
                 callbacks.as_ptr(),
                 Some(context.as_context()),
-                // This is enabled by default to remove the Option requirement around various fields of the
-                // [Request][crate::Request] struct
                 self.0
                     | CloudFilters::CF_CONNECT_FLAG_REQUIRE_FULL_FILE_PATH
                     | CloudFilters::CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO,
             )
-        }?;
-
+        }
+        .map_err(ConnectFailure::before_connect)?;
+        // Establish actual key/context/callback ownership BEFORE watcher spawn.
+        let mut connection = Connection::new(key.0, callbacks, filter.clone(), context, self.1);
         let watcher = if self.1.watcher_spawn() {
             Err(std::io::Error::other("injected watcher spawn failure"))
         } else {
             spawn_root_watcher(
                 path.as_ref().to_path_buf(),
                 directory,
-                filter.clone(),
+                filter,
                 self.1.watcher_panic(),
             )
         };
-        let (cancel_token, join_handle) = match watcher {
-            Ok(watcher) => watcher,
-            Err(error) => {
-                if let Err(rollback) = unsafe { CfDisconnectSyncRoot(CF_CONNECTION_KEY(key.0)) } {
-                    log::error!("Connect rollback could not disconnect: {rollback}");
-                }
-                // Removing the token is safe either way: late callbacks resolve nothing.
-                drop(context);
-                return Err(error.into());
+        match watcher {
+            Ok((sender, handle)) => {
+                connection.attach_watcher(sender, handle);
+                Ok(connection)
             }
-        };
-
-        Ok(Connection::new(
-            key.0,
-            cancel_token,
-            join_handle,
-            callbacks,
-            filter,
-            context,
-            self.1,
-        ))
+            Err(error) => Err(ConnectFailure {
+                error: error.into(),
+                connection: Some(Box::new(connection)),
+            }),
+        }
     }
 
     /// Initiates a connection to the sync root with the given [Filter].

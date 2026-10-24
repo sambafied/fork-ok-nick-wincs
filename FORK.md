@@ -33,6 +33,35 @@ promise. No dependency was added to the product repository.
 
 ## API migration
 
+Issue29 source adds `Session::connect_retained` and owned `ConnectFailure` for
+callers that must retain the genuine native connection after watcher-spawn
+failure. `into_parts()` returns the original error plus optional actual
+`Connection`; retain it on the original native owner until explicit shutdown.
+The native key/context/filter are owned before watcher startup. No watcher was
+started when `watcher_state()` is `NotStarted`; that is not provider readiness.
+Normal startup requires the real watcher `Running` plus the caller's original
+identity/proof/current admission. `Exited` is not yet joined, `Joined` is a
+normal observed join, and `FailedJoined` retains the failed join provenance.
+
+`Connection::disconnect_retained` shares the actual native disconnect/drain
+implementation with legacy `disconnect`, and distinguishes
+`DrainedWithWatcherFailure` from normal `Complete`: native disconnect actually
+succeeded, callback count is zero and the actual watcher joined with failure.
+This proves those resources drained, not successful watcher/provider operation.
+Native errors keep the actual key/context/watcher for retry by the same owner.
+Legacy `connect` retains its error/rollback API and uses its documented bounded
+Drop fallback; legacy `disconnect` still returns an error after watcher failure.
+Dropping/ignoring a retained error does not qualify shutdown: consume its actual
+connection and keep it through explicit retained shutdown. No public raw-key
+adoption API was added. See [the exact ownership contract](qualification/29-retained-connect.md).
+
+This issue29 candidate is source-only and UNBUILT/type-unverified. The current
+human phase defers compiler/tests/new test definitions/native/CI execution;
+standalone syntax/whitespace and independent source review are separate from
+runtime qualification. All historical native PASS evidence below predates this
+candidate and does not qualify these changed bytes. Package/dependency versions,
+MIT notices and existing tests remain unchanged; no release is published.
+
 `Connection::disconnect` reports native failure, `CallbacksActive`,
 `WatcherStopping` or `Complete`. `CallbacksActive` is new: match it (or treat
 every non-Complete status as "poll again"). Wait for Complete before
