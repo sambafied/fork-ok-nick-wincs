@@ -85,3 +85,29 @@ No disposable output was created. Exact fork source retained by w29_move_code
 for issue29/draft30 and desktop whole W29. Cleanup trigger remains independent
 normal fork landing/closure/clean pushed/no active refs/locks/process and root
 minimum custody ACK. Do not delete the primary's existing target/qualification.
+
+Whole bounded issue29 source audit (candidate after ced90b6):
+
+| ID | Required source behavior | Concrete source | Code audit | Runtime/E2E |
+| --- | --- | --- | --- | --- |
+| AC01 | Own successful native key/context before watcher creation | session.rs170 and Connection::new | Defined; coordinator source-reviewed | Not run |
+| AC02 | Pre-key failure does not fabricate native owner | ConnectFailure::before_connect and connect_retained preflight | Defined; coordinator source-reviewed | Not run |
+| AC03 | Partial watcher-start error transfers same real connection | session.rs188; owned error into_parts60 | Defined; coordinator source-reviewed | Not run |
+| AC04 | Native shutdown error retains original context/key/callback ownership | disconnect_retained138; context removal only after native success149 | Defined; coordinator source-reviewed | Not run |
+| AC05 | Optional fields describe actual watcher resources | attach_watcher114; NotStarted is explicit | Defined; coordinator source-reviewed | Not run |
+| AC06 | Normal shutdown requires actual native disconnect/callback drain/watcher completion | retained common shutdown138-170 | Defined; coordinator source-reviewed | Not run |
+| AC07 | Failed watcher join remains distinct from Complete | DrainedWithWatcherFailure plus legacy error mapping125 | Defined; coordinator source-reviewed | Not run |
+| AC08 | Pure watcher metadata does not mint native authority | watcher_state173; five explicit states | Defined; coordinator source-reviewed | Not run |
+| AC09 | Preserve legacy sync/async API and rollback/fallback contract | connect119, connect_async194, unchanged ShutdownStatus variants and bounded Drop | Defined; coordinator source-reviewed | Not run |
+| AC10 | No Filter/key logging/adoption, dependency/test/MIT changes or unmerged product pin | manual error Debug/Display; private constructors; exact Git diff | Defined; coordinator source-reviewed | Not run |
+
+Coordinator independently full-read production ced90b6 and actual base/callers,
+verified GitHub signature/whitespace and reported no additional bounded finding.
+Migration86e5f47 is included; this final audit is source evidence only. Existing
+Cargo.toml/Cargo.lock/LICENSE/tests/fault injection source have zero diff from
+actual base. No new tests/definitions/runtime/CI/native execution, no compiler/
+type evidence. This candidate fixes the exact necessary API ownership contract,
+not watcher overflow, all callback safety, all native qualification or whole
+Sambafied desktop W29. Draft30 requires final exact-head coordinator eligibility
+ACK before ready/normal merge. Product pin remains e7865a7 until actual normal
+fork merge and immutable closure ACK; no branch/local-patch product integration.
