@@ -68,3 +68,20 @@ reviewed normal landing/closure/clean pushed/no active locks/refs/process and
 root minimum custody ACK; then helper-policy Git worktree/branch cleanup.
 Primary157995578959a82642f90ff8d9b0b7fc9276d1f3 remains untouched, including its
 existing target/qualification. Desktop W29 remains Partial until whole delivery.
+
+Source implementation checkpoint: signed/pushed ced90b6 implements the complete
+bounded API definitions in src/root/session.rs, connect.rs and mod.rs. Boxed
+partial error keeps genuine ownership without a large by-value error; into_parts
+moves that same Connection once. New native owner exists before watcher spawn;
+optional fields correspond only to real watcher resources. Shared shutdown and
+watcher metadata preserve the original failure distinction. Legacy connect uses
+the common retained core followed by its rollback and bounded Drop fallback;
+there is no promised deadline on native CFAPI itself. Source-only self review,
+standalone rustfmt syntax and git whitespace pass; no compiler/type/runtime/
+native/E2E results exist for this candidate. Root independent full source review
+is pending; draft PR30 remains incomplete until findings/eligible normal gates.
+
+No disposable output was created. Exact fork source retained by w29_move_code
+for issue29/draft30 and desktop whole W29. Cleanup trigger remains independent
+normal fork landing/closure/clean pushed/no active refs/locks/process and root
+minimum custody ACK. Do not delete the primary's existing target/qualification.
