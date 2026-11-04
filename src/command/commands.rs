@@ -14,9 +14,9 @@ use windows::{
 };
 
 use crate::{
-    command::executor::{execute, Command, Fallible},
+    command::executor::{execute_with_context, Command, Fallible},
     error::CloudErrorKind,
-    filter::{RawConnectionKey, RawTransferKey},
+    filter::{OperationContext, RawConnectionKey, RawTransferKey},
     metadata::Metadata,
     placeholder_file::PlaceholderFile,
 };
@@ -88,25 +88,31 @@ impl Write<'_> {
     /// Complete failed user I/O over the requested range; a zero-length range
     /// overlaps no pending reads and cannot report their failure.
     pub(crate) fn fail_range(
-        connection_key: RawConnectionKey,
-        transfer_key: RawTransferKey,
+        context: &OperationContext,
         error_kind: CloudErrorKind,
         offset: i64,
         length: i64,
     ) -> core::Result<()> {
-        execute::<Self>(
-            CF_OPERATION_PARAMETERS_0 {
-                TransferData: CF_OPERATION_PARAMETERS_0_0 {
-                    Flags: CloudFilters::CF_OPERATION_TRANSFER_DATA_FLAG_NONE,
-                    CompletionStatus: error_kind.into(),
-                    Buffer: std::ptr::null_mut(),
-                    Offset: offset,
-                    Length: length,
-                },
-            },
-            connection_key,
-            transfer_key,
+        execute_with_context::<Self>(
+            Self::failure_parameters(error_kind, offset, length),
+            context,
         )
+    }
+
+    fn failure_parameters(
+        error_kind: CloudErrorKind,
+        offset: i64,
+        length: i64,
+    ) -> CF_OPERATION_PARAMETERS_0 {
+        CF_OPERATION_PARAMETERS_0 {
+            TransferData: CF_OPERATION_PARAMETERS_0_0 {
+                Flags: CloudFilters::CF_OPERATION_TRANSFER_DATA_FLAG_NONE,
+                CompletionStatus: error_kind.into(),
+                Buffer: std::ptr::null_mut(),
+                Offset: offset,
+                Length: length,
+            },
+        }
     }
 }
 
@@ -195,21 +201,34 @@ impl Fallible for CreatePlaceholders<'_> {
         transfer_key: RawTransferKey,
         error_kind: CloudErrorKind,
     ) -> core::Result<Self::Result> {
-        execute::<Self>(
-            CF_OPERATION_PARAMETERS_0 {
-                TransferPlaceholders: CF_OPERATION_PARAMETERS_0_4 {
-                    Flags: CloudFilters::CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE,
-                    CompletionStatus: error_kind.into(),
-                    PlaceholderTotalCount: 0,
-                    // TODO: DOES THIS HAVE TO BE A VALID ARRAY?
-                    PlaceholderArray: ptr::null_mut(),
-                    PlaceholderCount: 0,
-                    EntriesProcessed: 0,
-                },
-            },
-            connection_key,
-            transfer_key,
+        Self::fail_with_context(
+            &OperationContext::from_keys(connection_key, transfer_key),
+            error_kind,
         )
+    }
+}
+
+impl CreatePlaceholders<'_> {
+    /// Report callback failure using the original owned operation context.
+    pub fn fail_with_context(
+        context: &OperationContext,
+        error_kind: CloudErrorKind,
+    ) -> core::Result<<Self as Command>::Result> {
+        execute_with_context::<Self>(Self::failure_parameters(error_kind), context)
+    }
+
+    fn failure_parameters(error_kind: CloudErrorKind) -> CF_OPERATION_PARAMETERS_0 {
+        CF_OPERATION_PARAMETERS_0 {
+            TransferPlaceholders: CF_OPERATION_PARAMETERS_0_4 {
+                Flags: CloudFilters::CF_OPERATION_TRANSFER_PLACEHOLDERS_FLAG_NONE,
+                CompletionStatus: error_kind.into(),
+                PlaceholderTotalCount: 0,
+                // TODO: DOES THIS HAVE TO BE A VALID ARRAY?
+                PlaceholderArray: ptr::null_mut(),
+                PlaceholderCount: 0,
+                EntriesProcessed: 0,
+            },
+        }
     }
 }
 
@@ -246,18 +265,31 @@ impl Fallible for Validate {
         transfer_key: RawTransferKey,
         error_kind: CloudErrorKind,
     ) -> core::Result<Self::Result> {
-        execute::<Self>(
-            CF_OPERATION_PARAMETERS_0 {
-                AckData: CF_OPERATION_PARAMETERS_0_2 {
-                    Flags: CloudFilters::CF_OPERATION_ACK_DATA_FLAG_NONE,
-                    CompletionStatus: error_kind.into(),
-                    Offset: 0,
-                    Length: 0,
-                },
-            },
-            connection_key,
-            transfer_key,
+        Self::fail_with_context(
+            &OperationContext::from_keys(connection_key, transfer_key),
+            error_kind,
         )
+    }
+}
+
+impl Validate {
+    /// Report callback failure using the original owned operation context.
+    pub fn fail_with_context(
+        context: &OperationContext,
+        error_kind: CloudErrorKind,
+    ) -> core::Result<<Self as Command>::Result> {
+        execute_with_context::<Self>(Self::failure_parameters(error_kind), context)
+    }
+
+    fn failure_parameters(error_kind: CloudErrorKind) -> CF_OPERATION_PARAMETERS_0 {
+        CF_OPERATION_PARAMETERS_0 {
+            AckData: CF_OPERATION_PARAMETERS_0_2 {
+                Flags: CloudFilters::CF_OPERATION_ACK_DATA_FLAG_NONE,
+                CompletionStatus: error_kind.into(),
+                Offset: 0,
+                Length: 0,
+            },
+        }
     }
 }
 
@@ -297,18 +329,31 @@ impl Fallible for Dehydrate<'_> {
         transfer_key: RawTransferKey,
         error_kind: CloudErrorKind,
     ) -> core::Result<Self::Result> {
-        execute::<Self>(
-            CF_OPERATION_PARAMETERS_0 {
-                AckDehydrate: CF_OPERATION_PARAMETERS_0_5 {
-                    Flags: CloudFilters::CF_OPERATION_ACK_DEHYDRATE_FLAG_NONE,
-                    CompletionStatus: error_kind.into(),
-                    FileIdentity: ptr::null(),
-                    FileIdentityLength: 0,
-                },
-            },
-            connection_key,
-            transfer_key,
+        Self::fail_with_context(
+            &OperationContext::from_keys(connection_key, transfer_key),
+            error_kind,
         )
+    }
+}
+
+impl Dehydrate<'_> {
+    /// Report callback failure using the original owned operation context.
+    pub fn fail_with_context(
+        context: &OperationContext,
+        error_kind: CloudErrorKind,
+    ) -> core::Result<<Self as Command>::Result> {
+        execute_with_context::<Self>(Self::failure_parameters(error_kind), context)
+    }
+
+    fn failure_parameters(error_kind: CloudErrorKind) -> CF_OPERATION_PARAMETERS_0 {
+        CF_OPERATION_PARAMETERS_0 {
+            AckDehydrate: CF_OPERATION_PARAMETERS_0_5 {
+                Flags: CloudFilters::CF_OPERATION_ACK_DEHYDRATE_FLAG_NONE,
+                CompletionStatus: error_kind.into(),
+                FileIdentity: ptr::null(),
+                FileIdentityLength: 0,
+            },
+        }
     }
 }
 
@@ -340,16 +385,29 @@ impl Fallible for Delete {
         transfer_key: RawTransferKey,
         error_kind: CloudErrorKind,
     ) -> core::Result<Self::Result> {
-        execute::<Self>(
-            CF_OPERATION_PARAMETERS_0 {
-                AckDelete: CF_OPERATION_PARAMETERS_0_7 {
-                    Flags: CloudFilters::CF_OPERATION_ACK_DELETE_FLAG_NONE,
-                    CompletionStatus: error_kind.into(),
-                },
-            },
-            connection_key,
-            transfer_key,
+        Self::fail_with_context(
+            &OperationContext::from_keys(connection_key, transfer_key),
+            error_kind,
         )
+    }
+}
+
+impl Delete {
+    /// Report callback failure using the original owned operation context.
+    pub fn fail_with_context(
+        context: &OperationContext,
+        error_kind: CloudErrorKind,
+    ) -> core::Result<<Self as Command>::Result> {
+        execute_with_context::<Self>(Self::failure_parameters(error_kind), context)
+    }
+
+    fn failure_parameters(error_kind: CloudErrorKind) -> CF_OPERATION_PARAMETERS_0 {
+        CF_OPERATION_PARAMETERS_0 {
+            AckDelete: CF_OPERATION_PARAMETERS_0_7 {
+                Flags: CloudFilters::CF_OPERATION_ACK_DELETE_FLAG_NONE,
+                CompletionStatus: error_kind.into(),
+            },
+        }
     }
 }
 
@@ -381,16 +439,29 @@ impl Fallible for Rename {
         transfer_key: RawTransferKey,
         error_kind: CloudErrorKind,
     ) -> core::Result<Self::Result> {
-        execute::<Self>(
-            CF_OPERATION_PARAMETERS_0 {
-                AckRename: CF_OPERATION_PARAMETERS_0_6 {
-                    Flags: CloudFilters::CF_OPERATION_ACK_RENAME_FLAG_NONE,
-                    CompletionStatus: error_kind.into(),
-                },
-            },
-            connection_key,
-            transfer_key,
+        Self::fail_with_context(
+            &OperationContext::from_keys(connection_key, transfer_key),
+            error_kind,
         )
+    }
+}
+
+impl Rename {
+    /// Report callback failure using the original owned operation context.
+    pub fn fail_with_context(
+        context: &OperationContext,
+        error_kind: CloudErrorKind,
+    ) -> core::Result<<Self as Command>::Result> {
+        execute_with_context::<Self>(Self::failure_parameters(error_kind), context)
+    }
+
+    fn failure_parameters(error_kind: CloudErrorKind) -> CF_OPERATION_PARAMETERS_0 {
+        CF_OPERATION_PARAMETERS_0 {
+            AckRename: CF_OPERATION_PARAMETERS_0_6 {
+                Flags: CloudFilters::CF_OPERATION_ACK_RENAME_FLAG_NONE,
+                CompletionStatus: error_kind.into(),
+            },
+        }
     }
 }
 
@@ -399,8 +470,26 @@ pub(crate) fn placeholder_batch(
     placeholders: &mut [PlaceholderFile],
     total: u64,
     final_batch: bool,
-    connection_key: RawConnectionKey,
-    transfer_key: RawTransferKey,
+    context: &OperationContext,
+) -> core::Result<u32> {
+    placeholder_batch_with(
+        placeholders,
+        total,
+        final_batch,
+        context,
+        super::executor::execute_raw_with_context::<CreatePlaceholders>,
+    )
+}
+
+fn placeholder_batch_with(
+    placeholders: &mut [PlaceholderFile],
+    total: u64,
+    final_batch: bool,
+    context: &OperationContext,
+    execute: impl FnOnce(
+        CF_OPERATION_PARAMETERS_0,
+        &OperationContext,
+    ) -> core::Result<CF_OPERATION_PARAMETERS_0>,
 ) -> core::Result<u32> {
     let invalid = || core::Error::from(Foundation::E_INVALIDARG);
     let count = u32::try_from(placeholders.len()).map_err(|_| invalid())?;
@@ -426,7 +515,110 @@ pub(crate) fn placeholder_batch(
             EntriesProcessed: 0,
         },
     };
-    let output =
-        super::executor::execute_raw::<CreatePlaceholders>(info, connection_key, transfer_key)?;
+    let output = execute(info, context)?;
     Ok(unsafe { output.TransferPlaceholders.EntriesProcessed })
+}
+
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+    use windows::Win32::Storage::CloudFilters::{CF_CALLBACK_INFO, CF_CONNECTION_KEY};
+
+    fn assert_failure_context<C: Command>(parameters: CF_OPERATION_PARAMETERS_0) {
+        for request_key in [0, 17] {
+            let context = OperationContext::from_callback(&CF_CALLBACK_INFO {
+                ConnectionKey: CF_CONNECTION_KEY(7),
+                TransferKey: 11,
+                RequestKey: request_key,
+                ..Default::default()
+            });
+            super::super::executor::execute_with::<C>(parameters, &context, |operation, _| {
+                assert_eq!(operation.Type, C::OPERATION);
+                assert_eq!(operation.ConnectionKey.0, 7);
+                assert_eq!(operation.TransferKey, 11);
+                assert_eq!(operation.RequestKey, request_key);
+                Ok(())
+            })
+            .unwrap();
+            let refused =
+                super::super::executor::execute_with::<C>(parameters, &context, |operation, _| {
+                    assert_eq!(operation.RequestKey, request_key);
+                    Err(Foundation::E_FAIL.into())
+                });
+            assert_eq!(refused.err().unwrap().code(), Foundation::E_FAIL);
+        }
+    }
+
+    #[test]
+    fn all_callback_failure_builders_preserve_status_range_and_context() {
+        let error = CloudErrorKind::AuthenticationFailed;
+        let expected: Foundation::NTSTATUS = error.into();
+        let write = Write::failure_parameters(error, 4096, -1);
+        assert_eq!(unsafe { write.TransferData.CompletionStatus }, expected);
+        assert_eq!(unsafe { write.TransferData.Offset }, 4096);
+        assert_eq!(unsafe { write.TransferData.Length }, -1);
+        assert!(unsafe { write.TransferData.Buffer }.is_null());
+        assert_failure_context::<Write>(write);
+        let populate = CreatePlaceholders::failure_parameters(error);
+        assert_eq!(
+            unsafe { populate.TransferPlaceholders.CompletionStatus },
+            expected
+        );
+        assert_failure_context::<CreatePlaceholders>(populate);
+        let validate = Validate::failure_parameters(error);
+        assert_eq!(unsafe { validate.AckData.CompletionStatus }, expected);
+        assert_failure_context::<Validate>(validate);
+        let dehydrate = Dehydrate::failure_parameters(error);
+        assert_eq!(unsafe { dehydrate.AckDehydrate.CompletionStatus }, expected);
+        assert_failure_context::<Dehydrate>(dehydrate);
+        let delete = Delete::failure_parameters(error);
+        assert_eq!(unsafe { delete.AckDelete.CompletionStatus }, expected);
+        assert_failure_context::<Delete>(delete);
+        let rename = Rename::failure_parameters(error);
+        assert_eq!(unsafe { rename.AckRename.CompletionStatus }, expected);
+        assert_failure_context::<Rename>(rename);
+    }
+
+    #[test]
+    fn placeholder_batch_preserves_context_and_native_processed_count() {
+        let context = OperationContext::from_callback(&CF_CALLBACK_INFO {
+            ConnectionKey: CF_CONNECTION_KEY(7),
+            TransferKey: 11,
+            RequestKey: 17,
+            ..Default::default()
+        });
+        let mut placeholders = [PlaceholderFile::new("a"), PlaceholderFile::new("b")];
+        let processed =
+            placeholder_batch_with(&mut placeholders, 2, true, &context, |info, context| {
+                super::super::executor::execute_with::<CreatePlaceholders>(
+                    info,
+                    context,
+                    |operation, parameters| {
+                        assert_eq!(operation.ConnectionKey.0, 7);
+                        assert_eq!(operation.TransferKey, 11);
+                        assert_eq!(operation.RequestKey, 17);
+                        assert_eq!(
+                            unsafe { parameters.Anonymous.TransferPlaceholders.PlaceholderCount },
+                            2
+                        );
+                        parameters.Anonymous.TransferPlaceholders.EntriesProcessed = 1;
+                        Ok(())
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(processed, 1);
+        for total in [1, u64::MAX] {
+            assert!(
+                placeholder_batch_with(&mut placeholders, total, false, &context, |_, _| {
+                    panic!("Invalid batch reached the native executor")
+                })
+                .is_err()
+            );
+        }
+        let refused = placeholder_batch_with(&mut placeholders, 2, true, &context, |_, _| {
+            Err(Foundation::E_FAIL.into())
+        });
+        assert_eq!(refused.err().unwrap().code(), Foundation::E_FAIL);
+    }
 }

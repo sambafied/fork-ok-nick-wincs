@@ -10,6 +10,27 @@ use windows::Win32::Storage::CloudFilters::{
     CF_CALLBACK_PARAMETERS_0_9,
 };
 
+fn checked_data_range(
+    offset: i64,
+    length: i64,
+    file_size: u64,
+) -> windows::core::Result<Range<u64>> {
+    let invalid = || windows::core::Error::from(windows::Win32::Foundation::E_INVALIDARG);
+    let file_size = i64::try_from(file_size).map_err(|_| invalid())?;
+    if offset < 0 || offset > file_size {
+        return Err(invalid());
+    }
+    let end = match length {
+        -1 => file_size, // CF_EOF extends to the actual end of this file.
+        0.. => offset
+            .checked_add(length)
+            .ok_or_else(invalid)?
+            .min(file_size),
+        _ => return Err(invalid()),
+    };
+    Ok((offset as u64)..(end as u64))
+}
+
 /// Information for the [SyncFilter::fetch_data][crate::filter::SyncFilter::fetch_data] callback.
 pub struct FetchData(pub(crate) CF_CALLBACK_PARAMETERS_0_1);
 
@@ -31,6 +52,11 @@ impl FetchData {
             ..(self.0.RequiredFileOffset + self.0.RequiredLength) as u64
     }
 
+    /// Decode the required range, resolving CF_EOF and clamping to actual EOF.
+    pub fn try_required_file_range(&self, file_size: u64) -> windows::core::Result<Range<u64>> {
+        checked_data_range(self.0.RequiredFileOffset, self.0.RequiredLength, file_size)
+    }
+
     /// The amount of bytes that must be written to the placeholder.
     ///
     /// If the sync provider prefer to give data in larger chunks, use this range instead.
@@ -39,6 +65,11 @@ impl FetchData {
     pub fn optional_file_range(&self) -> Range<u64> {
         (self.0.OptionalFileOffset as u64)
             ..(self.0.OptionalFileOffset + self.0.OptionalLength) as u64
+    }
+
+    /// Decode the optional range, resolving CF_EOF and clamping to actual EOF.
+    pub fn try_optional_file_range(&self, file_size: u64) -> windows::core::Result<Range<u64>> {
+        checked_data_range(self.0.OptionalFileOffset, self.0.OptionalLength, file_size)
     }
 
     /// The last time the file was dehydrated.
@@ -84,6 +115,12 @@ impl CancelFetchData {
     pub fn file_range(&self) -> Range<u64> {
         let range = unsafe { self.0.Anonymous.FetchData };
         (range.FileOffset as u64)..(range.FileOffset + range.Length) as u64
+    }
+
+    /// Decode the cancelled range within the actual file, including CF_EOF.
+    pub fn try_file_range(&self, file_size: u64) -> windows::core::Result<Range<u64>> {
+        let range = unsafe { self.0.Anonymous.FetchData };
+        checked_data_range(range.FileOffset, range.Length, file_size)
     }
 }
 
@@ -393,5 +430,56 @@ impl DehydrationReason {
             CloudFilters::CF_CALLBACK_DEHYDRATION_REASON_SYSTEM_OS_UPGRADE => Some(Self::OsUpgrade),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+    use windows::Win32::Storage::CloudFilters::CF_CALLBACK_PARAMETERS_0_0_0_0;
+
+    #[test]
+    fn checked_ranges_preserve_eof_and_reject_signed_overflow() {
+        assert_eq!(checked_data_range(4, 3, 10).unwrap(), 4..7);
+        assert_eq!(checked_data_range(4, -1, 10).unwrap(), 4..10);
+        assert_eq!(checked_data_range(4, 20, 10).unwrap(), 4..10);
+        assert_eq!(checked_data_range(10, 0, 10).unwrap(), 10..10);
+        assert_eq!(checked_data_range(0, -1, 0).unwrap(), 0..0);
+        for (offset, length, size) in [
+            (-1, 1, 10),
+            (11, 0, 10),
+            (0, -2, 10),
+            (i64::MAX, 1, i64::MAX as u64),
+            (0, 1, u64::MAX),
+        ] {
+            assert_eq!(
+                checked_data_range(offset, length, size).unwrap_err().code(),
+                windows::Win32::Foundation::E_INVALIDARG
+            );
+        }
+    }
+
+    #[test]
+    fn fetch_and_cancel_checked_readers_use_the_actual_native_fields() {
+        let fetch = FetchData(CF_CALLBACK_PARAMETERS_0_1 {
+            RequiredFileOffset: 4096,
+            RequiredLength: -1,
+            OptionalFileOffset: 0,
+            OptionalLength: 8192,
+            ..Default::default()
+        });
+        assert_eq!(fetch.try_required_file_range(6000).unwrap(), 4096..6000);
+        assert_eq!(fetch.try_optional_file_range(6000).unwrap(), 0..6000);
+        let mut cancel = CF_CALLBACK_PARAMETERS_0_0::default();
+        cancel.Anonymous.FetchData = CF_CALLBACK_PARAMETERS_0_0_0_0 {
+            FileOffset: 4096,
+            Length: -1,
+        };
+        assert_eq!(
+            CancelFetchData(cancel).try_file_range(6000).unwrap(),
+            4096..6000
+        );
+        cancel.Anonymous.FetchData.FileOffset = -1;
+        assert!(CancelFetchData(cancel).try_file_range(6000).is_err());
     }
 }
