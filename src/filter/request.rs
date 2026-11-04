@@ -7,11 +7,13 @@ pub type RawConnectionKey = i64;
 pub type RawTransferKey = i64;
 
 /// A struct containing standard information for the current file operation.
-pub struct Request(CF_CALLBACK_INFO);
+pub struct Request(CF_CALLBACK_INFO, super::OperationContext);
 
 impl Request {
-    pub(crate) fn new(info: CF_CALLBACK_INFO) -> Self {
-        Self(info)
+    pub(crate) fn new(mut info: CF_CALLBACK_INFO) -> Self {
+        let context = super::OperationContext::from_callback(&info);
+        info.CorrelationVector = std::ptr::null();
+        Self(info, context)
     }
 
     /// The GUID path of the current volume.
@@ -115,14 +117,9 @@ impl Request {
     // /// consider calling this method or call placeholder methods more frequently.
     // pub fn reset_timeout() {}
 
-    /// A raw connection key used to identify the connection.
-    pub(crate) fn connection_key(&self) -> RawConnectionKey {
-        self.0.ConnectionKey.0
-    }
-
-    /// A raw transfer key used to identify the current file operation.
-    pub(crate) fn transfer_key(&self) -> RawTransferKey {
-        self.0.TransferKey
+    /// Clone the operation values already owned when this request was constructed.
+    pub fn operation_context(&self) -> super::OperationContext {
+        self.1.clone()
     }
 }
 
@@ -201,5 +198,40 @@ impl std::fmt::Debug for Process {
             .field("command_line", &self.command_line())
             .field("path", &self.path())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod operation_context_tests {
+    use super::*;
+    use windows::Win32::{
+        Storage::CloudFilters::{CF_CONNECTION_KEY, CF_OPERATION_TYPE_TRANSFER_DATA},
+        System::CorrelationVector::CORRELATION_VECTOR,
+    };
+
+    #[test]
+    fn operation_context_survives_the_original_callback_correlation_storage() {
+        let request = {
+            let mut correlation = CORRELATION_VECTOR::default();
+            correlation.Vector[0] = 42;
+            let mut info = CF_CALLBACK_INFO {
+                ConnectionKey: CF_CONNECTION_KEY(7),
+                TransferKey: 11,
+                RequestKey: 17,
+                CorrelationVector: &correlation,
+                ..Default::default()
+            };
+            let request = Request::new(info);
+            correlation.Vector[0] = 9;
+            info.CorrelationVector = std::ptr::null();
+            assert!(info.CorrelationVector.is_null());
+            assert_eq!(correlation.Vector[0], 9);
+            request
+        };
+        assert!(request.0.CorrelationVector.is_null());
+        let context = request.operation_context();
+        let operation = context.operation_info(CF_OPERATION_TYPE_TRANSFER_DATA);
+        assert_eq!(operation.RequestKey, 17);
+        assert_eq!(unsafe { (*operation.CorrelationVector).Vector[0] }, 42);
     }
 }

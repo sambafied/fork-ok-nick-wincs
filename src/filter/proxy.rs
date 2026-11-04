@@ -5,7 +5,7 @@ use windows::Win32::Storage::CloudFilters::{
 };
 
 use crate::{
-    command::{self, Fallible},
+    command,
     filter::{info, ticket, Request, SyncFilter},
 };
 
@@ -80,9 +80,8 @@ pub unsafe extern "system" fn fetch_data<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let connection_key = request.connection_key();
-        let transfer_key = request.transfer_key();
-        let ticket = ticket::FetchData::new(connection_key, transfer_key);
+        let context = request.operation_context();
+        let ticket = ticket::FetchData::new(context.clone());
 
         let Err(e) = filter.fetch_data(
             request,
@@ -93,13 +92,9 @@ pub unsafe extern "system" fn fetch_data<T: SyncFilter + 'static>(
         };
 
         let range = (*params).Anonymous.FetchData;
-        if let Err(error) = command::Write::fail_range(
-            connection_key,
-            transfer_key,
-            e,
-            range.RequiredFileOffset,
-            range.RequiredLength,
-        ) {
+        if let Err(error) =
+            command::Write::fail_range(&context, e, range.RequiredFileOffset, range.RequiredLength)
+        {
             log::error!("Cannot report callback failure: {error}");
         }
     }
@@ -111,9 +106,8 @@ pub unsafe extern "system" fn validate_data<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let connection_key = request.connection_key();
-        let transfer_key = request.transfer_key();
-        let ticket = ticket::ValidateData::new(connection_key, transfer_key);
+        let context = request.operation_context();
+        let ticket = ticket::ValidateData::new(context.clone());
 
         let Err(e) = filter.validate_data(
             request,
@@ -123,7 +117,7 @@ pub unsafe extern "system" fn validate_data<T: SyncFilter + 'static>(
             return;
         };
 
-        if let Err(error) = command::Validate::fail(connection_key, transfer_key, e) {
+        if let Err(error) = command::Validate::fail_with_context(&context, e) {
             log::error!("Cannot report callback failure: {error}");
         }
     }
@@ -147,9 +141,8 @@ pub unsafe extern "system" fn fetch_placeholders<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let connection_key = request.connection_key();
-        let transfer_key = request.transfer_key();
-        let ticket = ticket::FetchPlaceholders::new(connection_key, transfer_key);
+        let context = request.operation_context();
+        let ticket = ticket::FetchPlaceholders::new(context.clone());
 
         let Err(e) = filter.fetch_placeholders(
             request,
@@ -159,7 +152,7 @@ pub unsafe extern "system" fn fetch_placeholders<T: SyncFilter + 'static>(
             return;
         };
 
-        if let Err(error) = command::CreatePlaceholders::fail(connection_key, transfer_key, e) {
+        if let Err(error) = command::CreatePlaceholders::fail_with_context(&context, e) {
             log::error!("Cannot report callback failure: {error}");
         }
     }
@@ -207,9 +200,8 @@ pub unsafe extern "system" fn notify_dehydrate<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let connection_key = request.connection_key();
-        let transfer_key = request.transfer_key();
-        let ticket = ticket::Dehydrate::new(connection_key, transfer_key);
+        let context = request.operation_context();
+        let ticket = ticket::Dehydrate::new(context.clone());
 
         let Err(e) = filter.dehydrate(
             request,
@@ -219,7 +211,7 @@ pub unsafe extern "system" fn notify_dehydrate<T: SyncFilter + 'static>(
             return;
         };
 
-        if let Err(error) = command::Dehydrate::fail(connection_key, transfer_key, e) {
+        if let Err(error) = command::Dehydrate::fail_with_context(&context, e) {
             log::error!("Cannot report callback failure: {error}");
         }
     }
@@ -243,16 +235,15 @@ pub unsafe extern "system" fn notify_delete<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let connection_key = request.connection_key();
-        let transfer_key = request.transfer_key();
-        let ticket = ticket::Delete::new(connection_key, transfer_key);
+        let context = request.operation_context();
+        let ticket = ticket::Delete::new(context.clone());
 
         let Err(e) = filter.delete(request, ticket, info::Delete((*params).Anonymous.Delete))
         else {
             return;
         };
 
-        if let Err(error) = command::Delete::fail(connection_key, transfer_key, e) {
+        if let Err(error) = command::Delete::fail_with_context(&context, e) {
             log::error!("Cannot report callback failure: {error}");
         }
     }
@@ -276,16 +267,15 @@ pub unsafe extern "system" fn notify_rename<T: SyncFilter + 'static>(
 ) {
     if let Some(filter) = filter_from_info::<T>(info) {
         let request = Request::new(*info);
-        let connection_key = request.connection_key();
-        let transfer_key = request.transfer_key();
-        let ticket = ticket::Rename::new(connection_key, transfer_key);
+        let context = request.operation_context();
+        let ticket = ticket::Rename::new(context.clone());
         let info = info::Rename((*params).Anonymous.Rename, request.volume_letter());
 
         let Err(e) = filter.rename(request, ticket, info) else {
             return;
         };
 
-        if let Err(error) = command::Rename::fail(connection_key, transfer_key, e) {
+        if let Err(error) = command::Rename::fail_with_context(&context, e) {
             log::error!("Cannot report callback failure: {error}");
         }
     }

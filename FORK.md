@@ -33,6 +33,29 @@ promise. No dependency was added to the product repository.
 
 ## API migration
 
+Issue #5 adds `Request::operation_context()` and a context accessor on each
+callback ticket. The context owns the original connection/transfer/request values
+and a copy of optional correlation storage. `Request` captures that context at
+its private native constructor; its accessor clones the stored value. This grows
+the fixed Rust layouts of `Request` and tickets; consumers must measure the
+changed types when reviewing their own working-storage accounting.
+Use `OperationContext::identity()`
+for opaque equality together with the original callback lifecycle. Zero and
+reused values remain exact; equality alone does not establish completion.
+
+Ticket operations and proxy failure replies retain this context through the
+native call. `Command::execute_with_context` and the built-in commands'
+`fail_with_context` methods support the same propagation. Existing public
+connection/transfer-pair methods retain default request-key behavior.
+
+The new checked required, optional and cancellation range readers take the actual
+file size, resolve `CF_EOF`, clamp to EOF and reject negative offsets, invalid
+lengths and signed overflow. Existing range readers remain available during
+consumer migration. See [the operation contract](qualification/5-operation-context.md).
+This source candidate still requires Windows compilation, focused tests and native
+callback/cancellation receipts. Callback metadata hardening remains issue #3 and
+general FFI panic containment remains issue #4.
+
 Issue29 source adds `Session::connect_retained` and owned `ConnectFailure` for
 callers that must retain the genuine native connection after watcher-spawn
 failure. `into_parts()` returns the original error plus optional actual

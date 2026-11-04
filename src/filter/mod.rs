@@ -9,6 +9,7 @@ pub mod ticket;
 
 pub use async_filter::{AsyncBridge, Filter};
 pub(crate) use context::ContextToken;
+pub use operation_context::{OperationContext, OperationIdentity};
 pub(crate) use proxy::{callbacks, Callbacks};
 pub use request::{Process, Request};
 pub(crate) use request::{RawConnectionKey, RawTransferKey};
@@ -16,6 +17,7 @@ pub use sync_filter::SyncFilter;
 
 mod async_filter;
 mod context;
+mod operation_context;
 mod proxy;
 mod request;
 mod sync_filter;

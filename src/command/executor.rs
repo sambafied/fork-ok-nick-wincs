@@ -1,19 +1,16 @@
-use std::{
-    mem::{self, offset_of},
-    ptr,
-};
+use std::mem::{self, offset_of};
 
 use windows::{
     core,
     Win32::Storage::CloudFilters::{
-        self, CfExecute, CF_CONNECTION_KEY, CF_OPERATION_INFO, CF_OPERATION_PARAMETERS,
-        CF_OPERATION_PARAMETERS_0, CF_OPERATION_TYPE,
+        CfExecute, CF_OPERATION_INFO, CF_OPERATION_PARAMETERS, CF_OPERATION_PARAMETERS_0,
+        CF_OPERATION_TYPE,
     },
 };
 
 use crate::{
     error::CloudErrorKind,
-    filter::{RawConnectionKey, RawTransferKey},
+    filter::{OperationContext, RawConnectionKey, RawTransferKey},
 };
 
 /// Allows a command to fail with a specified error.
@@ -53,6 +50,11 @@ pub trait Command: Sized {
     ) -> core::Result<Self::Result> {
         execute::<Self>(self.build(), connection_key, transfer_key)
     }
+
+    /// Execute using the owned context from the original callback or ticket.
+    fn execute_with_context(&self, context: &OperationContext) -> core::Result<Self::Result> {
+        execute_with_context::<Self>(self.build(), context)
+    }
 }
 
 pub fn execute<C: Command>(
@@ -69,30 +71,35 @@ pub(crate) fn execute_raw<C: Command>(
     connection_key: RawConnectionKey,
     transfer_key: RawTransferKey,
 ) -> core::Result<CF_OPERATION_PARAMETERS_0> {
-    execute_with::<C>(
+    execute_raw_with_context::<C>(
         info,
-        connection_key,
-        transfer_key,
-        |operation, parameters| unsafe { CfExecute(operation, parameters) },
+        &OperationContext::from_keys(connection_key, transfer_key),
     )
 }
 
-fn execute_with<C: Command>(
+pub(crate) fn execute_with_context<C: Command>(
     info: CF_OPERATION_PARAMETERS_0,
-    connection_key: RawConnectionKey,
-    transfer_key: RawTransferKey,
+    context: &OperationContext,
+) -> core::Result<C::Result> {
+    let output = execute_raw_with_context::<C>(info, context)?;
+    Ok(unsafe { C::result(output) })
+}
+
+pub(crate) fn execute_raw_with_context<C: Command>(
+    info: CF_OPERATION_PARAMETERS_0,
+    context: &OperationContext,
+) -> core::Result<CF_OPERATION_PARAMETERS_0> {
+    execute_with::<C>(info, context, |operation, parameters| unsafe {
+        CfExecute(operation, parameters)
+    })
+}
+
+pub(super) fn execute_with<C: Command>(
+    info: CF_OPERATION_PARAMETERS_0,
+    context: &OperationContext,
     invoke: impl FnOnce(&CF_OPERATION_INFO, &mut CF_OPERATION_PARAMETERS) -> core::Result<()>,
 ) -> core::Result<CF_OPERATION_PARAMETERS_0> {
-    let operation = CF_OPERATION_INFO {
-        StructSize: mem::size_of::<CF_OPERATION_INFO>() as u32,
-        Type: C::OPERATION,
-        ConnectionKey: CF_CONNECTION_KEY(connection_key),
-        TransferKey: transfer_key,
-        CorrelationVector: ptr::null(),
-        SyncStatus: ptr::null(),
-        // Request context propagation is tracked separately in fork #5.
-        RequestKey: CloudFilters::CF_REQUEST_KEY_DEFAULT as i64,
-    };
+    let operation = context.operation_info(C::OPERATION);
     let mut parameters = CF_OPERATION_PARAMETERS {
         ParamSize: (mem::size_of::<C::Field>() + offset_of!(CF_OPERATION_PARAMETERS, Anonymous))
             as u32,
@@ -115,13 +122,64 @@ mod tests {
             buffer: &mut buffer,
             position: 0,
         };
-        let output = execute_with::<Read>(command.build(), 1, 2, |_, params| {
+        let context = OperationContext::from_keys(1, 2);
+        let output = execute_with::<Read>(command.build(), &context, |operation, params| {
+            assert_eq!(operation.ConnectionKey.0, 1);
+            assert_eq!(operation.TransferKey, 2);
+            assert_eq!(
+                operation.RequestKey,
+                windows::Win32::Storage::CloudFilters::CF_REQUEST_KEY_DEFAULT as i64
+            );
+            assert!(operation.CorrelationVector.is_null());
             params.Anonymous.RetrieveData.ReturnedLength = 42;
             Ok(())
         })
         .unwrap();
         assert_eq!(unsafe { Read::result(output) }, 42);
-        let failed = execute_with::<Read>(command.build(), 1, 2, |_, _| Err(E_FAIL.into()));
+        let failed = execute_with::<Read>(command.build(), &context, |_, _| Err(E_FAIL.into()));
         assert_eq!(failed.err().unwrap().code(), E_FAIL);
+    }
+
+    #[test]
+    fn callback_request_and_owned_correlation_reach_the_actual_executor() {
+        use windows::Win32::{
+            Storage::CloudFilters::{CF_CALLBACK_INFO, CF_CONNECTION_KEY},
+            System::CorrelationVector::CORRELATION_VECTOR,
+        };
+        let mut correlation = CORRELATION_VECTOR::default();
+        correlation.Vector[0] = 42;
+        let context = OperationContext::from_callback(&CF_CALLBACK_INFO {
+            ConnectionKey: CF_CONNECTION_KEY(7),
+            TransferKey: 11,
+            RequestKey: 17,
+            CorrelationVector: &correlation,
+            ..Default::default()
+        });
+        correlation.Vector[0] = 9;
+        let mut buffer = [0u8; 42];
+        let command = Read {
+            buffer: &mut buffer,
+            position: 0,
+        };
+        let returned = execute_with::<Read>(command.build(), &context, |operation, parameters| {
+            assert_eq!(operation.ConnectionKey.0, 7);
+            assert_eq!(operation.TransferKey, 11);
+            assert_eq!(operation.RequestKey, 17);
+            assert_eq!(unsafe { (*operation.CorrelationVector).Vector[0] }, 42);
+            parameters.Anonymous.RetrieveData.ReturnedLength = 23;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(unsafe { Read::result(returned) }, 23);
+        assert_eq!(
+            execute_with::<Read>(command.build(), &context, |operation, _| {
+                assert_eq!(operation.RequestKey, 17);
+                Err(E_FAIL.into())
+            })
+            .err()
+            .unwrap()
+            .code(),
+            E_FAIL
+        );
     }
 }
