@@ -169,3 +169,11 @@ Tracked by [Sambafied #188](https://github.com/sambafied/sambafied/issues/188),
 with shared-engine prerequisites #186/#187. SMB remains available; WinFsp #194
 remains the separate virtual-volume option. The owner requested no Explorer
 restart, sign-out or package upgrade for this work.
+
+## Planned optional process identity (#3 / Desktop #532)
+
+The cache-use publisher needs explicitly requested, nullable callback process
+identity. [The bounded contract](qualification/3-process-info.md) adds an opt-in
+connect flag and checked owned scalar PID/session snapshot while preserving all
+existing defaults and legacy APIs. Implementation, exact Windows tests and
+independent review remain required; no consumer pin or native activation changes.
