@@ -91,6 +91,11 @@ impl Request {
         OsString::from_wide(&self.volume_dos)
     }
 
+    /// Borrow captured UTF-16 for fallible callback-info snapshots.
+    pub(crate) fn volume_utf16(&self) -> &[u16] {
+        &self.volume_dos
+    }
+
     pub fn volume_serial_number(&self) -> u32 {
         self.volume_serial
     }

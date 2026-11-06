@@ -471,7 +471,7 @@ pub unsafe extern "system" fn notify_dehydrate_completion<T: SyncFilter + 'stati
         let raw = unsafe {
             read_parameter_arm::<CloudFilters::CF_CALLBACK_PARAMETERS_0_7>(
                 params,
-                field_end!(CloudFilters::CF_CALLBACK_PARAMETERS_0_7, Flags),
+                field_end!(CloudFilters::CF_CALLBACK_PARAMETERS_0_7, Reason),
             )?
         };
         let details = info::Dehydrated(raw);
@@ -564,7 +564,7 @@ pub unsafe extern "system" fn notify_rename<T: SyncFilter + 'static>(
                 field_end!(CloudFilters::CF_CALLBACK_PARAMETERS_0_10, TargetPath),
             )?
         };
-        let details = unsafe { info::Rename::new(raw, request.volume_letter())? };
+        let details = unsafe { info::Rename::new(raw, request.volume_utf16())? };
         Ok((request, details))
     })();
     let (request, details) = match captured {
@@ -598,7 +598,7 @@ pub unsafe extern "system" fn notify_rename_completion<T: SyncFilter + 'static>(
                 field_end!(CloudFilters::CF_CALLBACK_PARAMETERS_0_11, SourcePath),
             )?
         };
-        let details = unsafe { info::Renamed::new(raw, request.volume_letter())? };
+        let details = unsafe { info::Renamed::new(raw, request.volume_utf16())? };
         Ok((request, details))
     })();
     let (request, details) = match captured {

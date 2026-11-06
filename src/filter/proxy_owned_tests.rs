@@ -28,6 +28,7 @@ use windows::{
 struct CountedFilter {
     requests: Mutex<Vec<Request>>,
     errors: Mutex<Vec<MetadataError>>,
+    dehydration_reasons: Mutex<Vec<Option<info::DehydrationReason>>>,
 }
 
 impl CountedFilter {
@@ -70,7 +71,11 @@ impl SyncFilter for CountedFilter {
         self.capture(request);
     }
 
-    fn dehydrated(&self, request: Request, _: info::Dehydrated) {
+    fn dehydrated(&self, request: Request, details: info::Dehydrated) {
+        self.dehydration_reasons
+            .lock()
+            .unwrap()
+            .push(details.reason());
         self.capture(request);
     }
 
@@ -362,6 +367,71 @@ fn notification_parameter_header_is_rejected_before_union_dispatch() {
         unsafe { callback(&native.raw, params) };
         filter.assert_rejected(index + 1, MetadataError::TruncatedParameters);
     }
+}
+
+#[test]
+fn dehydrated_completion_preserves_nonzero_reason_from_exact_consumed_prefix() {
+    let filter = Arc::new(CountedFilter::default());
+    let token = ContextToken::register(&filter);
+    let native = NativeFixture::new(token.as_context() as *mut _);
+    let raw = CloudFilters::CF_CALLBACK_PARAMETERS_0_7 {
+        Reason: CloudFilters::CF_CALLBACK_DEHYDRATION_REASON_SYSTEM_LOW_SPACE,
+        ..Default::default()
+    };
+    assert_ne!(raw.Reason.0, 0);
+
+    let union_offset = offset_of!(CF_CALLBACK_PARAMETERS, Anonymous);
+    let consumed_bytes = field_end!(CloudFilters::CF_CALLBACK_PARAMETERS_0_7, Reason);
+    let mut buffer = vec![0u8; union_offset + consumed_bytes];
+    let announced = buffer.len() as u32;
+    unsafe {
+        ptr::write_unaligned(buffer.as_mut_ptr().cast::<u32>(), announced);
+        ptr::copy_nonoverlapping(
+            ptr::from_ref(&raw).cast::<u8>(),
+            buffer.as_mut_ptr().add(union_offset),
+            consumed_bytes,
+        );
+        notify_dehydrate_completion::<CountedFilter>(
+            &native.raw,
+            buffer.as_ptr().cast::<CF_CALLBACK_PARAMETERS>(),
+        );
+    }
+
+    // Overwrite and release the ABI storage before inspecting the result.
+    buffer.fill(0);
+    drop(buffer);
+    drop(native);
+    assert!(filter.errors.lock().unwrap().is_empty());
+    assert_eq!(filter.requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        *filter.dehydration_reasons.lock().unwrap(),
+        [Some(info::DehydrationReason::LowSpace)]
+    );
+}
+
+#[test]
+fn dehydrated_completion_rejects_actual_flags_only_buffer_before_dispatch() {
+    let filter = Arc::new(CountedFilter::default());
+    let token = ContextToken::register(&filter);
+    let native = NativeFixture::new(token.as_context() as *mut _);
+    let union_offset = offset_of!(CF_CALLBACK_PARAMETERS, Anonymous);
+    let flags_bytes = field_end!(CloudFilters::CF_CALLBACK_PARAMETERS_0_7, Flags);
+    let reason_bytes = field_end!(CloudFilters::CF_CALLBACK_PARAMETERS_0_7, Reason);
+    assert!(flags_bytes < reason_bytes);
+
+    // This allocation really ends after Flags. No Reason field exists behind it.
+    let mut buffer = vec![0u8; union_offset + flags_bytes];
+    let announced = buffer.len() as u32;
+    unsafe {
+        ptr::write_unaligned(buffer.as_mut_ptr().cast::<u32>(), announced);
+        notify_dehydrate_completion::<CountedFilter>(
+            &native.raw,
+            buffer.as_ptr().cast::<CF_CALLBACK_PARAMETERS>(),
+        );
+    }
+
+    filter.assert_rejected(1, MetadataError::TruncatedParameters);
+    assert!(filter.dehydration_reasons.lock().unwrap().is_empty());
 }
 
 #[test]

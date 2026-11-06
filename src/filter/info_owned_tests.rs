@@ -25,7 +25,6 @@ fn metadata_survives_mutation_free_and_thread_transfer_before_first_getter() {
     let mut target = wide(r"new\目录😀.txt");
     let mut source = wide(r"old\資料😀.txt");
     let mut native_volume = wide(r"Q:\private-root");
-    let volume = OsString::from_wide(&native_volume[..native_volume.len() - 1]);
     let fetch_flags = CloudFilters::CF_CALLBACK_FETCH_PLACEHOLDERS_FLAGS(0x40);
     let rename_flags = CloudFilters::CF_CALLBACK_RENAME_FLAG_IS_DIRECTORY
         | CloudFilters::CF_CALLBACK_RENAME_FLAG_SOURCE_IN_SCOPE
@@ -45,7 +44,7 @@ fn metadata_survives_mutation_free_and_thread_transfer_before_first_getter() {
                 Flags: rename_flags,
                 TargetPath: PCWSTR(target.as_ptr()),
             },
-            volume.clone(),
+            &native_volume[..native_volume.len() - 1],
         )
     }
     .expect("capture target");
@@ -55,7 +54,7 @@ fn metadata_survives_mutation_free_and_thread_transfer_before_first_getter() {
                 Flags: renamed_flags,
                 SourcePath: PCWSTR(source.as_ptr()),
             },
-            volume,
+            &native_volume[..native_volume.len() - 1],
         )
     }
     .expect("capture source");
@@ -118,11 +117,11 @@ fn optional_null_pattern_is_unrestricted_and_empty_remains_empty() {
 #[test]
 fn required_null_paths_are_rejected() {
     assert!(matches!(
-        unsafe { Rename::new(CF_CALLBACK_PARAMETERS_0_10::default(), OsString::from("Q:"),) },
+        unsafe { Rename::new(CF_CALLBACK_PARAMETERS_0_10::default(), &wide("Q:")[..2]) },
         Err(MetadataError::InvalidString)
     ));
     assert!(matches!(
-        unsafe { Renamed::new(CF_CALLBACK_PARAMETERS_0_11::default(), OsString::from("Q:"),) },
+        unsafe { Renamed::new(CF_CALLBACK_PARAMETERS_0_11::default(), &wide("Q:")[..2]) },
         Err(MetadataError::InvalidString)
     ));
 }
@@ -162,7 +161,7 @@ fn each_rename_flag_is_preserved_independently() {
                     Flags: flags,
                     TargetPath: PCWSTR(path.as_ptr()),
                 },
-                OsString::from("Q:"),
+                &wide("Q:")[..2],
             )
         }
         .unwrap();
@@ -195,7 +194,7 @@ fn maximum_terminated_buffers_are_owned() {
                 TargetPath: PCWSTR(buffer.as_ptr()),
                 ..Default::default()
             },
-            OsString::new(),
+            &[],
         )
     }
     .unwrap();
@@ -205,7 +204,7 @@ fn maximum_terminated_buffers_are_owned() {
                 SourcePath: PCWSTR(buffer.as_ptr()),
                 ..Default::default()
             },
-            OsString::new(),
+            &[],
         )
     }
     .unwrap();
@@ -242,7 +241,7 @@ fn unterminated_readable_maximum_buffers_are_rejected() {
                     TargetPath: PCWSTR(buffer.as_ptr()),
                     ..Default::default()
                 },
-                OsString::new(),
+                &[],
             )
         },
         Err(MetadataError::InvalidString)
@@ -254,7 +253,7 @@ fn unterminated_readable_maximum_buffers_are_rejected() {
                     SourcePath: PCWSTR(buffer.as_ptr()),
                     ..Default::default()
                 },
-                OsString::new(),
+                &[],
             )
         },
         Err(MetadataError::InvalidString)
@@ -277,6 +276,57 @@ fn invalid_glob_remains_an_accessor_error_after_native_buffer_is_freed() {
     std::thread::spawn(move || {
         assert!(info.pattern().is_err());
         assert_eq!(format!("{info:?}"), "FetchPlaceholders { .. }");
+    })
+    .join()
+    .unwrap();
+}
+
+#[test]
+fn rename_volume_bounds_are_checked_before_native_path_capture() {
+    // Null native paths are intentional: oversized volume must refuse before
+    // attempting path capture. Empty volume remains supported by other tests.
+    let volume = vec![b'v' as u16; MAX_WIDE_UNITS];
+    assert!(matches!(
+        unsafe { Rename::new(CF_CALLBACK_PARAMETERS_0_10::default(), &volume) },
+        Err(MetadataError::InvalidString)
+    ));
+    assert!(matches!(
+        unsafe { Renamed::new(CF_CALLBACK_PARAMETERS_0_11::default(), &volume) },
+        Err(MetadataError::InvalidString)
+    ));
+}
+
+#[test]
+fn maximum_volume_is_owned_before_backing_mutation_and_free() {
+    let mut volume = vec![b'v' as u16; MAX_WIDE_UNITS - 1];
+    let path = wide("child");
+    let rename = unsafe {
+        Rename::new(
+            CF_CALLBACK_PARAMETERS_0_10 {
+                TargetPath: PCWSTR(path.as_ptr()),
+                ..Default::default()
+            },
+            &volume,
+        )
+    }
+    .unwrap();
+    let renamed = unsafe {
+        Renamed::new(
+            CF_CALLBACK_PARAMETERS_0_11 {
+                SourcePath: PCWSTR(path.as_ptr()),
+                ..Default::default()
+            },
+            &volume,
+        )
+    }
+    .unwrap();
+    volume.fill(b'x' as u16);
+    drop((volume, path));
+    std::thread::spawn(move || {
+        let mut expected = PathBuf::from("v".repeat(MAX_WIDE_UNITS - 1));
+        expected.push("child");
+        assert_eq!(rename.target_path(), expected);
+        assert_eq!(renamed.source_path(), expected);
     })
     .join()
     .unwrap();

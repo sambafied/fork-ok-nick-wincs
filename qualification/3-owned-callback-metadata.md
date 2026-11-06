@@ -106,3 +106,14 @@ Primary contracts:
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_callback_info
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_process_info
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_callback_parameters
+
+## Implementation checkpoint (2026-11-06)
+
+Owned callback metadata and pure regression definitions are implemented. The
+independent implementation review found and repaired two admission defects:
+dehydration-completion now requires its consumed Reason field, and rename volume
+capture uses a bounded fallible UTF-16 copy instead of an allocating public
+getter. Both fixes include regression code. Fresh exact-head recheck and Windows
+compilation/test bodies remain pending. The previous Doctor compile allocation
+has settled; the current compile preflight refused a separately observed live
+VCTIP process. No native acceptance or Desktop caller enablement is claimed.

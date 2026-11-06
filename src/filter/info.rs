@@ -1,6 +1,6 @@
 use std::{ffi::OsString, fmt::Debug, ops::Range, os::windows::ffi::OsStringExt, path::PathBuf};
 
-use super::metadata::{copy_wide, MetadataError};
+use super::metadata::{copy_wide, MetadataError, MAX_WIDE_UNITS};
 use nt_time::FileTime;
 use windows::Win32::Storage::CloudFilters::{
     self, CF_CALLBACK_DEHYDRATION_REASON, CF_CALLBACK_PARAMETERS_0_0, CF_CALLBACK_PARAMETERS_0_1,
@@ -335,7 +335,20 @@ pub struct Deleted(pub(crate) CF_CALLBACK_PARAMETERS_0_9);
 pub struct Rename {
     flags: CloudFilters::CF_CALLBACK_RENAME_FLAGS,
     target_path: Vec<u16>,
-    volume: OsString,
+    volume: Vec<u16>,
+}
+
+/// Copies an already-captured, unterminated UTF-16 volume fallibly.
+fn capture_volume(volume: &[u16]) -> Result<Vec<u16>, MetadataError> {
+    if volume.len() >= MAX_WIDE_UNITS {
+        return Err(MetadataError::InvalidString);
+    }
+    let mut captured = Vec::new();
+    captured
+        .try_reserve_exact(volume.len())
+        .map_err(|_| MetadataError::Allocation)?;
+    captured.extend_from_slice(volume);
+    Ok(captured)
 }
 
 impl Rename {
@@ -347,8 +360,9 @@ impl Rename {
     /// structure's size before reading the ABI arm.
     pub(crate) unsafe fn new(
         raw: CF_CALLBACK_PARAMETERS_0_10,
-        volume: OsString,
+        volume: &[u16],
     ) -> Result<Self, MetadataError> {
+        let volume = capture_volume(volume)?;
         let target_path =
             unsafe { copy_wide(raw.TargetPath, true)? }.ok_or(MetadataError::InvalidString)?;
         Ok(Self {
@@ -375,7 +389,7 @@ impl Rename {
 
     /// The full path the placeholder is being moved to.
     pub fn target_path(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.volume);
+        let mut path = PathBuf::from(OsString::from_wide(&self.volume));
         path.push(OsString::from_wide(&self.target_path));
         path
     }
@@ -396,7 +410,7 @@ pub struct Renamed {
     #[allow(dead_code)]
     flags: CloudFilters::CF_CALLBACK_RENAME_COMPLETION_FLAGS,
     source_path: Vec<u16>,
-    volume: OsString,
+    volume: Vec<u16>,
 }
 
 impl Renamed {
@@ -408,8 +422,9 @@ impl Renamed {
     /// structure's size before reading the ABI arm.
     pub(crate) unsafe fn new(
         raw: CF_CALLBACK_PARAMETERS_0_11,
-        volume: OsString,
+        volume: &[u16],
     ) -> Result<Self, MetadataError> {
+        let volume = capture_volume(volume)?;
         let source_path =
             unsafe { copy_wide(raw.SourcePath, true)? }.ok_or(MetadataError::InvalidString)?;
         Ok(Self {
@@ -421,7 +436,7 @@ impl Renamed {
 
     /// The full path the placeholder has been moved from.
     pub fn source_path(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.volume);
+        let mut path = PathBuf::from(OsString::from_wide(&self.volume));
         path.push(OsString::from_wide(&self.source_path));
         path
     }
