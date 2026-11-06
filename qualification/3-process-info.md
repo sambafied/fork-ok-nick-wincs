@@ -11,7 +11,9 @@ Keep Session::new/default flags unchanged. Existing legacy connect and retained
 connect share those actual flags, without a new native lifecycle or registration.
 
 Add Request::process_identity returning an optional owned scalar PID/session
-snapshot, never a CF_PROCESS_INFO wrapper or native string pointer. Check that
+snapshot, never a CF_PROCESS_INFO wrapper or native string pointer. Capture the
+snapshot inside Request::new while original callback metadata is valid, before
+any dispatch; later accessor calls only copy the saved owned Option. Check that
 the callback StructSize includes ProcessInfo before inspecting its pointer;
 missing/null/undersized process metadata and zero PID return None. Read only
 fields whose declared native struct size includes them; retain no input pointer.
@@ -40,3 +42,11 @@ Primary API contracts:
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_connect_flags
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_callback_info
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_process_info
+
+Implementation checkpoint: the additive builder and callback-entry snapshot are
+implemented with eight focused unit definitions (two flag/default/composition and
+six metadata/ownership/redaction). A main-agent integration correction moved
+capture from accessor time into Request::new; the regression now destroys the
+backing metadata before its first accessor. Exact-path rustfmt and whitespace
+checks passed. Compilation, these eight bodies and independent full review are
+NOT_RUN/required. Existing native/installed/consumer/BOTH-PC gates remain open.

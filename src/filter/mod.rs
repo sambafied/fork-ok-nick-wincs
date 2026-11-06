@@ -10,7 +10,7 @@ pub mod ticket;
 pub use async_filter::{AsyncBridge, Filter};
 pub(crate) use context::ContextToken;
 pub(crate) use proxy::{callbacks, Callbacks};
-pub use request::{Process, Request};
+pub use request::{Process, ProcessIdentity, Request};
 pub(crate) use request::{RawConnectionKey, RawTransferKey};
 pub use sync_filter::SyncFilter;
 

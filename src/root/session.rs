@@ -91,6 +91,17 @@ impl Session {
         Self::default()
     }
 
+    /// Requests callback process metadata, including the process image path.
+    ///
+    /// This is opt-in; new/default sessions retain their existing flags.
+    /// Consumers must handle unavailable or incomplete process metadata.
+    /// PID/session metadata does not establish process birth, image identity,
+    /// continuing lifetime, consumer attribution, or cleanup authority.
+    pub fn require_process_info(mut self) -> Self {
+        self.0 |= CloudFilters::CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO;
+        self
+    }
+
     /// The [Session::block_implicit_hydration] flag will prevent
     /// implicit placeholder hydrations from invoking
     /// [SyncFilter::fetch_data][crate::filter::SyncFilter::fetch_data]. This could occur when an
@@ -340,6 +351,43 @@ mod tests {
             Err(CloudErrorKind::NotSupported)
         }
     }
+
+    #[test]
+    fn process_info_is_explicit_and_preserves_default_flags() {
+        assert_eq!(Session::new().0 .0, CloudFilters::CF_CONNECT_FLAG_NONE.0);
+        assert_eq!(
+            Session::default().0 .0,
+            CloudFilters::CF_CONNECT_FLAG_NONE.0
+        );
+        assert_eq!(
+            Session::new().require_process_info().0 .0,
+            CloudFilters::CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO.0
+        );
+    }
+
+    #[test]
+    fn process_info_and_self_hydration_flags_compose_in_either_order() {
+        let expected = (CloudFilters::CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO
+            | CloudFilters::CF_CONNECT_FLAG_BLOCK_SELF_IMPLICIT_HYDRATION)
+            .0;
+        assert_eq!(
+            Session::new()
+                .require_process_info()
+                .block_implicit_hydration()
+                .0
+                 .0,
+            expected
+        );
+        assert_eq!(
+            Session::new()
+                .block_implicit_hydration()
+                .require_process_info()
+                .0
+                 .0,
+            expected
+        );
+    }
+
     #[test]
     fn idle_native_directory_watcher_cancels_and_releases_directory() {
         let directory = tempfile::tempdir().unwrap();

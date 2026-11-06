@@ -173,7 +173,9 @@ restart, sign-out or package upgrade for this work.
 ## Planned optional process identity (#3 / Desktop #532)
 
 The cache-use publisher needs explicitly requested, nullable callback process
-identity. [The bounded contract](qualification/3-process-info.md) adds an opt-in
-connect flag and checked owned scalar PID/session snapshot while preserving all
-existing defaults and legacy APIs. Implementation, exact Windows tests and
-independent review remain required; no consumer pin or native activation changes.
+identity. [The bounded contract](qualification/3-process-info.md) implements an
+opt-in connect flag and checked owned scalar PID/session snapshot captured at
+Request construction, preserving all existing defaults and legacy APIs. Eight
+focused unit definitions and exact Windows compilation remain NOT_RUN, and
+independent review is required. No consumer pin or native activation changes;
+whole callback ownership and the actual-use publisher remain unfinished.
