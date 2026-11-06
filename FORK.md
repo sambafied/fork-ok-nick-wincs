@@ -180,3 +180,11 @@ adds only a checked scalar PID/session snapshot at Request construction, with
 redacted Debug and six regression definitions. Exact Windows compilation/tests
 and correction review remain required. No consumer pin or native activation
 changes; full callback ownership and actual-use publication remain unfinished.
+
+## Fallible owned callback metadata follow-up (#3)
+
+The next source contract is qualification/3-owned-callback-metadata.md. It removes
+consumed Request/Process/pattern/rename native borrows before async dispatch,
+separates CommandLine from ImagePath and makes nullable process metadata explicit.
+This is a proposed API migration; no implementation or new qualification is
+claimed by this Before checkpoint. Desktop adoption and native/GA gates stay open.
