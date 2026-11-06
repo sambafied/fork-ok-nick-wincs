@@ -7,11 +7,12 @@ pub type RawConnectionKey = i64;
 pub type RawTransferKey = i64;
 
 /// A struct containing standard information for the current file operation.
-pub struct Request(CF_CALLBACK_INFO);
+pub struct Request(CF_CALLBACK_INFO, Option<ProcessIdentity>);
 
 impl Request {
     pub(crate) fn new(info: CF_CALLBACK_INFO) -> Self {
-        Self(info)
+        let process_identity = Self::capture_process_identity(&info);
+        Self(info, process_identity)
     }
 
     /// The GUID path of the current volume.
@@ -36,6 +37,42 @@ impl Request {
     /// Information of the user process that triggered the callback.
     pub fn process(&self) -> Process {
         Process(unsafe { *self.0.ProcessInfo })
+    }
+
+    /// Returns the owned scalar process DATA captured at callback entry.
+    ///
+    /// Missing or undersized metadata and a zero PID return `None`. The result
+    /// contains no native strings or pointers and proves neither process birth
+    /// nor continuing lifetime, image identity, ownership or cleanup authority.
+    /// This accessor never reads the original native process metadata.
+    pub fn process_identity(&self) -> Option<ProcessIdentity> {
+        self.1
+    }
+
+    // Request::new calls this while the original native callback is valid,
+    // before dispatch can outlive its process metadata.
+    fn capture_process_identity(info: &CF_CALLBACK_INFO) -> Option<ProcessIdentity> {
+        let callback_end = std::mem::offset_of!(CF_CALLBACK_INFO, ProcessInfo)
+            + std::mem::size_of::<*const CF_PROCESS_INFO>();
+        if (info.StructSize as usize) < callback_end {
+            return None;
+        }
+        let process = info.ProcessInfo;
+        if process.is_null() {
+            return None;
+        }
+        // Native callback metadata guarantees a readable size header when the
+        // pointer is present. Do not form a reference or copy its pointer fields.
+        let size = unsafe { std::ptr::addr_of!((*process).StructSize).read_unaligned() };
+        let id_end = std::mem::offset_of!(CF_PROCESS_INFO, ProcessId) + std::mem::size_of::<u32>();
+        let session_end =
+            std::mem::offset_of!(CF_PROCESS_INFO, SessionId) + std::mem::size_of::<u32>();
+        if (size as usize) < id_end.max(session_end) {
+            return None;
+        }
+        let id = unsafe { std::ptr::addr_of!((*process).ProcessId).read_unaligned() };
+        let session_id = unsafe { std::ptr::addr_of!((*process).SessionId).read_unaligned() };
+        (id != 0).then_some(ProcessIdentity { id, session_id })
     }
 
     /// The NTFS file ID of the sync root folder under which the placeholder being operated on
@@ -142,6 +179,29 @@ impl std::fmt::Debug for Request {
     }
 }
 
+/// Owned scalar callback process DATA; not a process handle or authority.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ProcessIdentity {
+    id: u32,
+    session_id: u32,
+}
+
+impl ProcessIdentity {
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    pub fn session_id(&self) -> u32 {
+        self.session_id
+    }
+}
+
+impl std::fmt::Debug for ProcessIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessIdentity").finish_non_exhaustive()
+    }
+}
+
 /// Information about the calling process.
 pub struct Process(CF_PROCESS_INFO);
 
@@ -201,5 +261,90 @@ impl std::fmt::Debug for Process {
             .field("command_line", &self.command_line())
             .field("path", &self.path())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod process_identity_tests {
+    use super::*;
+
+    fn process(id: u32, session_id: u32) -> CF_PROCESS_INFO {
+        // These Windows ABI structs contain scalar values and nullable pointers.
+        let mut value: CF_PROCESS_INFO = unsafe { std::mem::zeroed() };
+        value.StructSize = std::mem::size_of::<CF_PROCESS_INFO>() as u32;
+        value.ProcessId = id;
+        value.SessionId = session_id;
+        value
+    }
+
+    fn callback(process: *const CF_PROCESS_INFO) -> CF_CALLBACK_INFO {
+        let mut value: CF_CALLBACK_INFO = unsafe { std::mem::zeroed() };
+        value.StructSize = std::mem::size_of::<CF_CALLBACK_INFO>() as u32;
+        value.ProcessInfo = process as _;
+        value
+    }
+
+    #[test]
+    fn truncated_callback_never_dereferences_process_pointer() {
+        // Deliberately unreadable: a truncated callback must reject before use.
+        let mut value = callback(1_usize as *const CF_PROCESS_INFO);
+        let end = std::mem::offset_of!(CF_CALLBACK_INFO, ProcessInfo)
+            + std::mem::size_of::<*const CF_PROCESS_INFO>();
+        for size in [0, end - 1] {
+            value.StructSize = size as u32;
+            assert!(Request::new(value).process_identity().is_none());
+        }
+    }
+
+    #[test]
+    fn absent_process_metadata_has_no_identity() {
+        assert!(Request::new(callback(std::ptr::null()))
+            .process_identity()
+            .is_none());
+    }
+
+    #[test]
+    fn incomplete_process_metadata_has_no_identity() {
+        let mut value = process(12345, 6789);
+        let id_end = std::mem::offset_of!(CF_PROCESS_INFO, ProcessId) + std::mem::size_of::<u32>();
+        let session_end =
+            std::mem::offset_of!(CF_PROCESS_INFO, SessionId) + std::mem::size_of::<u32>();
+        for size in [
+            0,
+            std::mem::size_of::<u32>() - 1,
+            id_end - 1,
+            session_end - 1,
+        ] {
+            value.StructSize = size as u32;
+            assert!(Request::new(callback(&value)).process_identity().is_none());
+        }
+    }
+
+    #[test]
+    fn zero_process_id_has_no_identity() {
+        let value = process(0, 6789);
+        assert!(Request::new(callback(&value)).process_identity().is_none());
+    }
+
+    #[test]
+    fn session_zero_remains_valid_scalar_data() {
+        let value = process(12345, 0);
+        let snapshot = Request::new(callback(&value)).process_identity().unwrap();
+        assert_eq!(snapshot.id(), 12345);
+        assert_eq!(snapshot.session_id(), 0);
+    }
+
+    #[test]
+    fn snapshot_owns_scalars_and_redacts_debug() {
+        let mut source = Box::new(process(12345, 6789));
+        let request = Request::new(callback(&*source));
+        source.ProcessId = 54321;
+        source.SessionId = 9876;
+        drop(source);
+        let snapshot = request.process_identity().unwrap();
+        drop(request);
+        assert_eq!(snapshot.id(), 12345);
+        assert_eq!(snapshot.session_id(), 6789);
+        assert_eq!(format!("{snapshot:?}"), "ProcessIdentity { .. }");
     }
 }
