@@ -13,6 +13,10 @@ use super::{info, ticket, SyncFilter};
 /// [Send] and [Sync] are required as the callback could be invoked from an arbitrary thread, [read
 /// here](https://docs.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_callback_type#remarks).
 pub trait Filter: Send + Sync {
+    /// Reports rejected callback metadata synchronously before async dispatch.
+    /// The default grants no complete-stream or native/cleanup authority.
+    fn metadata_error(&self, _error: super::MetadataError) {}
+
     /// A placeholder hydration has been requested. This means that the placeholder should be
     /// populated with its corresponding data on the remote.
     fn fetch_data(
@@ -172,6 +176,10 @@ where
     F: Filter,
     B: Fn(LocalBoxFuture<'_, ()>) + Send + Sync,
 {
+    fn metadata_error(&self, error: super::MetadataError) {
+        self.filter.metadata_error(error);
+    }
+
     fn fetch_data(
         &self,
         request: Request,
