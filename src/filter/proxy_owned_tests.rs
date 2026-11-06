@@ -118,7 +118,7 @@ impl NativeFixture {
         let package = wide("original-package");
         let application = wide("original-application");
         let command = wide("original.exe --original");
-        let process = Box::new(CF_PROCESS_INFO {
+        let mut process = Box::new(CF_PROCESS_INFO {
             StructSize: size_of::<CF_PROCESS_INFO>() as u32,
             ProcessId: 271,
             SessionId: 19,
@@ -138,7 +138,7 @@ impl NativeFixture {
             FileIdentityLength: file_blob.len() as u32,
             SyncRootIdentity: root_blob.as_ptr().cast(),
             SyncRootIdentityLength: root_blob.len() as u32,
-            ProcessInfo: ptr::from_ref(process.as_ref()),
+            ProcessInfo: ptr::from_mut(process.as_mut()),
             ConnectionKey: CF_CONNECTION_KEY(101),
             TransferKey: 202,
             FileSize: 303,
