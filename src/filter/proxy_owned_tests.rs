@@ -111,7 +111,8 @@ impl NativeFixture {
     fn new(context: *mut std::ffi::c_void) -> Self {
         let guid = wide(r"\\?\Volume{fixture}");
         let dos = wide("Q:");
-        let path = wide(r"owned\original.bin");
+        // CF_CALLBACK_INFO::NormalizedPath starts at the volume root.
+        let path = wide(r"\owned\original.bin");
         let file_blob = vec![1, 3, 5, 7];
         let root_blob = vec![2, 4, 6];
         let image = wide(r"Q:\apps\original.exe");
