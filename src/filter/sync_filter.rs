@@ -10,6 +10,13 @@ use crate::{
 /// [Send] and [Sync] are required as the callback could be invoked from an arbitrary thread, [read
 /// here](https://docs.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_callback_type#remarks).
 pub trait SyncFilter: Send + Sync {
+    /// A native callback could not be captured without retaining borrowed data.
+    ///
+    /// Consumers requiring complete notification coverage must invalidate their
+    /// original root's health here. The default grants no healthy-stream,
+    /// process-ownership or cleanup permission. Called before normal dispatch.
+    fn metadata_error(&self, _error: super::MetadataError) {}
+
     /// A placeholder hydration has been requested. This means that the placeholder should be
     /// populated with its corresponding data on the remote.
     fn fetch_data(

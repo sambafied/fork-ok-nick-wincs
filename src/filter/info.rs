@@ -1,7 +1,7 @@
-use std::{ffi::OsString, fmt::Debug, ops::Range, path::PathBuf};
+use std::{ffi::OsString, fmt::Debug, ops::Range, os::windows::ffi::OsStringExt, path::PathBuf};
 
+use super::metadata::{copy_wide, MetadataError};
 use nt_time::FileTime;
-use widestring::U16CStr;
 use windows::Win32::Storage::CloudFilters::{
     self, CF_CALLBACK_DEHYDRATION_REASON, CF_CALLBACK_PARAMETERS_0_0, CF_CALLBACK_PARAMETERS_0_1,
     CF_CALLBACK_PARAMETERS_0_10, CF_CALLBACK_PARAMETERS_0_11, CF_CALLBACK_PARAMETERS_0_2,
@@ -124,15 +124,39 @@ impl Debug for ValidateData {
 
 /// Information for the [SyncFilter::fetch_placeholders][crate::filter::SyncFilter::fetch_placeholders]
 /// callback.
-pub struct FetchPlaceholders(pub(crate) CF_CALLBACK_PARAMETERS_0_3);
+pub struct FetchPlaceholders {
+    #[allow(dead_code)]
+    flags: CloudFilters::CF_CALLBACK_FETCH_PLACEHOLDERS_FLAGS,
+    pattern: Option<Vec<u16>>,
+}
 
 impl FetchPlaceholders {
+    /// Captures the optional pattern while its native buffer is still alive.
+    ///
+    /// # Safety
+    /// A non-null Pattern must reference a readable SDK buffer for the bounded
+    /// scan performed by copy_wide. The caller must validate the parameter
+    /// structure's size before reading the ABI arm.
+    pub(crate) unsafe fn new(raw: CF_CALLBACK_PARAMETERS_0_3) -> Result<Self, MetadataError> {
+        Ok(Self {
+            flags: raw.Flags,
+            pattern: unsafe { copy_wide(raw.Pattern, false)? },
+        })
+    }
+
+    fn pattern_text(&self) -> String {
+        match &self.pattern {
+            Some(pattern) => String::from_utf16_lossy(pattern),
+            None => "*".to_owned(),
+        }
+    }
+
     /// A glob pattern specifying the files that should be fetched.
     ///
     /// This field is completely optional and does not have to be respected.
     #[cfg(feature = "globs")]
     pub fn pattern(&self) -> Result<globset::Glob, globset::Error> {
-        let pattern = unsafe { U16CStr::from_ptr_str(self.0.Pattern.0) }.to_string_lossy();
+        let pattern = self.pattern_text();
         globset::Glob::new(&pattern)
     }
 
@@ -141,15 +165,13 @@ impl FetchPlaceholders {
     /// This field is completely optional and does not have to be respected.
     #[cfg(not(feature = "globs"))]
     pub fn pattern(&self) -> String {
-        unsafe { U16CStr::from_ptr_str(self.0.Pattern.0) }.to_string_lossy()
+        self.pattern_text()
     }
 }
 
 impl Debug for FetchPlaceholders {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FetchPlaceholders")
-            .field("pattern", &self.pattern())
-            .finish()
+        f.debug_struct("FetchPlaceholders").finish_non_exhaustive()
     }
 }
 
@@ -310,28 +332,51 @@ impl Debug for Delete {
 pub struct Deleted(pub(crate) CF_CALLBACK_PARAMETERS_0_9);
 
 /// Information for the [SyncFilter::rename][crate::filter::SyncFilter::rename] callback.
-pub struct Rename(pub(crate) CF_CALLBACK_PARAMETERS_0_10, pub(crate) OsString);
+pub struct Rename {
+    flags: CloudFilters::CF_CALLBACK_RENAME_FLAGS,
+    target_path: Vec<u16>,
+    volume: OsString,
+}
 
 impl Rename {
+    /// Captures the target path while its native buffer is still alive.
+    ///
+    /// # Safety
+    /// TargetPath must reference a readable SDK buffer for the bounded scan
+    /// performed by copy_wide. The caller must validate the parameter
+    /// structure's size before reading the ABI arm.
+    pub(crate) unsafe fn new(
+        raw: CF_CALLBACK_PARAMETERS_0_10,
+        volume: OsString,
+    ) -> Result<Self, MetadataError> {
+        let target_path =
+            unsafe { copy_wide(raw.TargetPath, true)? }.ok_or(MetadataError::InvalidString)?;
+        Ok(Self {
+            flags: raw.Flags,
+            target_path,
+            volume,
+        })
+    }
+
     /// Whether or not the placeholder being renamed is a directory.
     pub fn is_directory(&self) -> bool {
-        (self.0.Flags & CloudFilters::CF_CALLBACK_RENAME_FLAG_IS_DIRECTORY).0 != 0
+        (self.flags & CloudFilters::CF_CALLBACK_RENAME_FLAG_IS_DIRECTORY).0 != 0
     }
 
     /// Whether or not the placeholder was originally in the sync root.
     pub fn source_in_scope(&self) -> bool {
-        (self.0.Flags & CloudFilters::CF_CALLBACK_RENAME_FLAG_SOURCE_IN_SCOPE).0 != 0
+        (self.flags & CloudFilters::CF_CALLBACK_RENAME_FLAG_SOURCE_IN_SCOPE).0 != 0
     }
 
     /// Whether or not the placeholder is being moved inside the sync root.
     pub fn target_in_scope(&self) -> bool {
-        (self.0.Flags & CloudFilters::CF_CALLBACK_RENAME_FLAG_TARGET_IN_SCOPE).0 != 0
+        (self.flags & CloudFilters::CF_CALLBACK_RENAME_FLAG_TARGET_IN_SCOPE).0 != 0
     }
 
     /// The full path the placeholder is being moved to.
     pub fn target_path(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.1);
-        path.push(unsafe { U16CStr::from_ptr_str(self.0.TargetPath.0) }.to_os_string());
+        let mut path = PathBuf::from(&self.volume);
+        path.push(OsString::from_wide(&self.target_path));
         path
     }
 }
@@ -342,30 +387,55 @@ impl Debug for Rename {
             .field("is_directory", &self.is_directory())
             .field("source_in_scope", &self.source_in_scope())
             .field("target_in_scope", &self.target_in_scope())
-            .field("target_path", &self.target_path())
             .finish()
     }
 }
 
 /// Information for the [SyncFilter::renamed][crate::filter::SyncFilter::renamed] callback.
-pub struct Renamed(pub(crate) CF_CALLBACK_PARAMETERS_0_11, pub(crate) OsString);
+pub struct Renamed {
+    #[allow(dead_code)]
+    flags: CloudFilters::CF_CALLBACK_RENAME_COMPLETION_FLAGS,
+    source_path: Vec<u16>,
+    volume: OsString,
+}
 
 impl Renamed {
+    /// Captures the source path while its native buffer is still alive.
+    ///
+    /// # Safety
+    /// SourcePath must reference a readable SDK buffer for the bounded scan
+    /// performed by copy_wide. The caller must validate the parameter
+    /// structure's size before reading the ABI arm.
+    pub(crate) unsafe fn new(
+        raw: CF_CALLBACK_PARAMETERS_0_11,
+        volume: OsString,
+    ) -> Result<Self, MetadataError> {
+        let source_path =
+            unsafe { copy_wide(raw.SourcePath, true)? }.ok_or(MetadataError::InvalidString)?;
+        Ok(Self {
+            flags: raw.Flags,
+            source_path,
+            volume,
+        })
+    }
+
     /// The full path the placeholder has been moved from.
     pub fn source_path(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.1);
-        path.push(unsafe { U16CStr::from_ptr_str(self.0.SourcePath.0) }.to_os_string());
+        let mut path = PathBuf::from(&self.volume);
+        path.push(OsString::from_wide(&self.source_path));
         path
     }
 }
 
 impl Debug for Renamed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Renamed")
-            .field("source_path", &self.source_path())
-            .finish()
+        f.debug_struct("Renamed").finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+#[path = "info_owned_tests.rs"]
+mod owned_tests;
 
 /// The reason a placeholder has been dehydrated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
