@@ -1,52 +1,49 @@
-# Optional callback process identity for cache-use observation
+# Owned optional callback process identity for cache-use observation
 
 Development: fork#3, Desktop#532/#56/#448, R13-CACHE-01,
 AEM-005/009/010/014. Base7ca3132899b8bc97e279e1e072442ca9ec16b449.
-This supplies prerequisites for the missing actual-use publisher, not that
+This supplies one prerequisite for the missing actual-use publisher, not that
 publisher or default cleanup activation. Existing PR31/#5 and its original
 retained worktree/owners remain untouched; no adoption or custody transfer.
 
-Add an explicit Session builder option requesting CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO.
-Keep Session::new/default flags unchanged. Existing legacy connect and retained
-connect share those actual flags, without a new native lifecycle or registration.
+Independent review corrected the initial contract's flag interpretation:
+Session's stored default flags are NONE, but connect_retained already always
+adds REQUIRE_PROCESS_INFO and REQUIRE_FULL_FILE_PATH at the actual native call.
+The proposed builder was therefore redundant. It and its two new private-flag
+tests were removed; src/root/session.rs is byte-identical to the base. Existing
+effective native defaults, connect/retained ownership and legacy tests survive.
+No new connection flag, native lifecycle or registration is introduced.
 
-Add Request::process_identity returning an optional owned scalar PID/session
-snapshot, never a CF_PROCESS_INFO wrapper or native string pointer. Capture the
-snapshot inside Request::new while original callback metadata is valid, before
-any dispatch; later accessor calls only copy the saved owned Option. Check that
-the callback StructSize includes ProcessInfo before inspecting its pointer;
-missing/null/undersized process metadata and zero PID return None. Read only
-fields whose declared native struct size includes them; retain no input pointer.
-No ImagePath/PackageName/ApplicationId/CommandLine parsing, allocation, logging,
-process opening, source authority, native owner or cleanup permission is added.
-Default Debug of the new snapshot is redacted. PID/session DATA cannot establish
-process birth, matching image, consumer classification or continuing lifetime.
-The future caller must conservatively preserve bytes for unknown attribution.
+Request::process_identity returns an optional owned scalar PID/session snapshot,
+never a CF_PROCESS_INFO wrapper or native string pointer. Capture occurs inside
+Request::new while original callback metadata is valid, before any dispatch;
+later accessor calls only copy the saved owned Option. Callback StructSize must
+include ProcessInfo before reading its pointer. Missing/null/undersized process
+metadata and zero PID produce None. Only size-covered scalar fields are read;
+no input pointer survives in the snapshot. Debug is redacted. No process string,
+allocation, process open, source authority, native owner or cleanup permission.
+PID/session DATA cannot establish process birth, matching image, consumer
+classification or continuing lifetime. Unknown attribution must preserve bytes.
 
-Keep the legacy process API unchanged in this bounded patch; full owned callback
-metadata, async borrowing, general FFI panic containment and existing unsafe
-convenience methods remain separate open#3/#4 work. This patch does not qualify
-those whole issues or PR31's operation context changes.
+Legacy process/string APIs remain unchanged. Full owned callback metadata,
+async borrowing and general FFI panic containment remain separate open#3/#4
+work. This patch does not qualify them or PR31 operation context changes.
 
-Generate deterministic unit regressions covering default/explicit flags without
-connecting; truncated callback metadata that must not dereference a supplied
-non-null pointer; null process; incomplete process headers/SessionId; zero PID;
-and valid owned scalar data surviving mutation/destruction of the native source.
-No native root/registration, service, installation or process metadata exposure.
-Main owns compilation/tests/review, signed immediate pushes, PR and cleanup.
-Full exact-head independent review and actual Windows compilation/tests precede
-eligible merge. Product Cargo pin changes require their own reviewed integration;
-source/library success is not genuine CFAPI callback/native/BOTH-PC acceptance.
+Six deterministic regression definitions cover a truncated callback whose
+non-null pointer must not be dereferenced; absent process; incomplete process
+headers/SessionId; zero PID; valid session0; and the owned value surviving native
+backing mutation/destruction before its first accessor, with Debug redaction.
+No native root/registration, service, installation or identity exposure is used.
+Main owns exact Windows compilation/tests, independent review, signed immediate
+pushes, PR and cleanup. Tests remain NOT_RUN until executed. Product Cargo pins
+need separate reviewed integration; source/unit success is not genuine callback,
+native/installed/BOTH-PC or full automatic cache acceptance.
+
+History: the initial contract was signed/pushed atf1c4a42 before code1f9edbef.
+Full independent review of1f9edbef found the redundant flag claim and otherwise
+found the owned snapshot coherent. This correction preserves that review history;
+a fresh repair recheck and all six current Windows bodies remain required.
 
 Primary API contracts:
-- https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ne-cfapi-cf_connect_flags
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_callback_info
 - https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_process_info
-
-Implementation checkpoint: the additive builder and callback-entry snapshot are
-implemented with eight focused unit definitions (two flag/default/composition and
-six metadata/ownership/redaction). A main-agent integration correction moved
-capture from accessor time into Request::new; the regression now destroys the
-backing metadata before its first accessor. Exact-path rustfmt and whitespace
-checks passed. Compilation, these eight bodies and independent full review are
-NOT_RUN/required. Existing native/installed/consumer/BOTH-PC gates remain open.
