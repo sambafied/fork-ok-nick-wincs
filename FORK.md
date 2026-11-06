@@ -186,5 +186,9 @@ changes; full callback ownership and actual-use publication remain unfinished.
 The next source contract is qualification/3-owned-callback-metadata.md. It removes
 consumed Request/Process/pattern/rename native borrows before async dispatch,
 separates CommandLine from ImagePath and makes nullable process metadata explicit.
-This is a proposed API migration; no implementation or new qualification is
-claimed by this Before checkpoint. Desktop adoption and native/GA gates stay open.
+PR33 implements this API migration with owned snapshots, guarded ABI admission,
+redacted failure hooks and deterministic regression definitions. Full scoped
+implementation review and correction recheck approved source0f276949. Exact-file
+parser/format and whitespace checks passed; Windows compilation and execution
+remain NOT_RUN behind an existing compiler allocation. Desktop adoption, complete
+operation-context/panic containment, native and GA gates stay open.
