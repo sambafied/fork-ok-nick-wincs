@@ -26,7 +26,9 @@ refuse null; process/package/application/command strings are nullable. Scan at
 most32768 UTF-16 units including the terminator. File identity is at most4096
 bytes and sync-root identity65536. Null plus zero-length blob is an empty Vec;
 null with nonzero length, oversize, unterminated or overflowed metadata refuses.
-Use fallible reservations for snapshot storage. A normal snapshot plus one
+Use fallible reservations for snapshot storage. Getter/cloned Process/OsString/
+PathBuf allocations retain their existing allocation behavior; the allocation
+refusal promise covers snapshot construction. A normal snapshot plus one
 owned pattern/rename path is bounded below1MiB; this is an allocation bound,
 not complete caller/native-frame resource funding or Source readiness.
 Native callback pointers must refer to readable SDK buffers for their declared
@@ -51,12 +53,30 @@ The other scalar-only info wrappers keep their existing APIs.
 ## Admission and completion behavior
 
 The proxy validates info/parameter pointers and size before copying each ABI
-structure/union arm. A failed owned snapshot is never dispatched to a normal
-consumer. Before any consumer effect, fallible operations report the existing
-failure through the original connection/transfer keys and exact fetch range;
-completion/cancel notifications have no invented acknowledgement. Report the
-metadata failure to the existing resolved filter through a default redacted
-metadata-error hook so a future publisher can invalidate root health rather
+structure/union arm. Resolve a filter only after StructSize covers CallbackContext.
+Extract failure-routing connection/transfer keys and the required fetch range
+only behind their own field-end guards. A null/truncated structure without those
+original values cannot authorize an acknowledgement: refuse normal dispatch,
+notify a safely resolved filter when available, and never invent keys or a
+zero-length range. When those original values are available, a failed owned
+snapshot is reported through the existing connection/transfer/range failure
+route before consumer effects. Completion/cancel notifications have no invented
+acknowledgement. Existing executor routing still uses CF_REQUEST_KEY_DEFAULT;
+full callback RequestKey/operation-context fidelity remains issue5/PR31 and is
+not qualified here. No competing OpContext or retained-owner adoption is added.
+
+Parameter admission uses the actual union offset plus the end of every consumed
+field, not the whole CF_CALLBACK_PARAMETERS size. Copy only covered bytes into
+the appropriate default-initialized ABI arm. Cancel-population consumes only
+flags; it must not read an unavailable cancel-fetch range. Respect ABI alignment
+and preserve legitimate CF_EOF == -1 operation lengths. Full known callback-info
+prefix admission intentionally refuses incomplete old layouts and accepts larger
+future sizes without reading their unknown tails. Process metadata is read field
+by field: preserve available old PID/image/package/application fields while later
+CommandLine/SessionId remain absent. No all-Windows-version compatibility claim.
+
+Report metadata failures through redacted hooks on both SyncFilter and Filter,
+forwarded by AsyncBridge, so a future publisher can invalidate root health rather
 than silently treating a dropped event as complete coverage. No healthy-stream,
 process ownership or cleanup permission is inferred from the default hook.
 General callback panic containment and async future/resource lifetime remain
