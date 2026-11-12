@@ -158,7 +158,9 @@ impl Request {
     }
 
     /// A raw transfer key used to identify the current file operation.
-    pub(crate) fn transfer_key(&self) -> RawTransferKey {
+    /// Scalar transfer identity for matching cancellation to already-owned work.
+    /// This value alone grants no right to construct or execute an operation.
+    pub fn transfer_key(&self) -> RawTransferKey {
         self.0.TransferKey
     }
 }

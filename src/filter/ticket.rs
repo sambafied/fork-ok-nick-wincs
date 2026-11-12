@@ -2,11 +2,15 @@ use std::ops::Range;
 
 use windows::{
     core,
-    Win32::Storage::CloudFilters::{CfReportProviderProgress, CF_CONNECTION_KEY},
+    Win32::{
+        Foundation::E_INVALIDARG,
+        Storage::CloudFilters::{CfReportProviderProgress, CF_CONNECTION_KEY},
+    },
 };
 
 use crate::{
-    command::{self, Command},
+    command::{self, Command, Fallible},
+    error::CloudErrorKind,
     filter::{RawConnectionKey, RawTransferKey},
     placeholder_file::PlaceholderFile,
     sealed, utility,
@@ -28,6 +32,23 @@ impl FetchData {
         }
     }
 
+    /// Completes a failed hydration over its original nonempty required range.
+    ///
+    /// This consumes the ticket. A deferred worker must retain the original
+    /// connection and its registration owners until this call has returned;
+    /// retaining the numeric ticket alone does not keep the connection alive.
+    /// Invalid or unrepresentable ranges fail before issuing a native operation.
+    pub fn fail_range(self, error_kind: CloudErrorKind, range: Range<u64>) -> core::Result<()> {
+        let (offset, length) = failure_range(range)?;
+        command::Write::fail_range(
+            self.connection_key,
+            self.transfer_key,
+            error_kind,
+            offset,
+            length,
+        )
+    }
+
     /// Displays a progress bar next to the file in the file explorer to show the progress of the
     /// current operation. In addition, the standard Windows file progress dialog will open
     /// displaying the speed and progress based on the values set. During background hydrations,
@@ -46,6 +67,21 @@ impl FetchData {
     }
 
     // TODO: response command::Update
+}
+
+fn failure_range(range: Range<u64>) -> core::Result<(i64, i64)> {
+    let invalid = || core::Error::from_hresult(E_INVALIDARG);
+    // Validate the endpoint too: two representable operands must not describe
+    // a native range whose exclusive end exceeds the signed CFAPI domain.
+    i64::try_from(range.end).map_err(|_| invalid())?;
+    let offset = i64::try_from(range.start).map_err(|_| invalid())?;
+    let length = range
+        .end
+        .checked_sub(range.start)
+        .filter(|length| *length != 0)
+        .ok_or_else(invalid)?;
+    let length = i64::try_from(length).map_err(|_| invalid())?;
+    Ok((offset, length))
 }
 
 impl utility::ReadAt for FetchData {
@@ -186,6 +222,13 @@ impl Dehydrate {
         }
     }
 
+    /// Refuses the original dehydration request, consuming its completion ticket.
+    /// A deferred worker must retain the original connection and registration
+    /// owners through the returned native result, including failure/uncertainty.
+    pub fn fail(self, error_kind: CloudErrorKind) -> core::Result<()> {
+        command::Dehydrate::fail(self.connection_key, self.transfer_key, error_kind)
+    }
+
     /// Confirms dehydration of the file.
     pub fn pass(&self) -> core::Result<()> {
         command::Dehydrate { blob: &[] }.execute(self.connection_key, self.transfer_key)
@@ -238,5 +281,39 @@ impl Rename {
     /// Confirms the rename/move of a file.
     pub fn pass(&self) -> core::Result<()> {
         command::Rename.execute(self.connection_key, self.transfer_key)
+    }
+}
+
+#[cfg(test)]
+mod failure_range_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_zero_offset_and_single_byte_eof_tail() {
+        assert_eq!(failure_range(0..4096).unwrap(), (0, 4096));
+        assert_eq!(failure_range(8192..8193).unwrap(), (8192, 1));
+    }
+
+    #[test]
+    fn accepts_the_largest_signed_exclusive_endpoint() {
+        let end = i64::MAX as u64;
+        assert_eq!(failure_range(0..end).unwrap(), (0, i64::MAX));
+        assert_eq!(failure_range(end - 1..end).unwrap(), (i64::MAX - 1, 1));
+    }
+
+    #[test]
+    fn rejects_empty_reversed_and_unsigned_ranges() {
+        let maximum = i64::MAX as u64;
+        for range in [
+            0..0,
+            4..4,
+            5..4,
+            0..maximum + 1,
+            maximum..u64::MAX,
+            u64::MAX..0,
+            u64::MAX..u64::MAX,
+        ] {
+            assert_eq!(failure_range(range).unwrap_err().code(), E_INVALIDARG);
+        }
     }
 }
