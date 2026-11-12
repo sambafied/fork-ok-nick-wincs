@@ -18,7 +18,13 @@ failure operation; notifications have no invented return status. Failure
 reporting and final filter release are themselves contained. Invalid non-null
 pointers and aborting panics cannot be recovered by Rust unwind handling.
 
-Validation on Windows: 24 library tests and library Clippy with warnings denied
+Bounded fetch/optional/cancellation range accessors resolve CF_EOF against the
+actual logical file size and clip finite EOF over-read without signed overflow.
+Negative offsets, malformed lengths and empty intersections refuse. A partial
+cancellation does not establish that all bytes in the original request are no
+longer needed. See the [native range contract](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_callback_parameters).
+
+Validation on Windows: 29 library tests and library/test Clippy with warnings denied
 passed. These are library/source checks, not real deferred CFAPI I/O or desktop
 shutdown acceptance. The desktop retains responsibility for admission bounds,
 requested coverage, cancellation and actual task/registration settlement.

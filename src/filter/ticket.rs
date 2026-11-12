@@ -307,10 +307,13 @@ mod failure_range_tests {
         for range in [
             0..0,
             4..4,
-            5..4,
+            Range { start: 5, end: 4 },
             0..maximum + 1,
             maximum..u64::MAX,
-            u64::MAX..0,
+            Range {
+                start: u64::MAX,
+                end: 0,
+            },
             u64::MAX..u64::MAX,
         ] {
             assert_eq!(failure_range(range).unwrap_err().code(), E_INVALIDARG);
