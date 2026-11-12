@@ -13,6 +13,39 @@ use windows::Win32::Storage::CloudFilters::{
 /// Information for the [SyncFilter::fetch_data][crate::filter::SyncFilter::fetch_data] callback.
 pub struct FetchData(pub(crate) CF_CALLBACK_PARAMETERS_0_1);
 
+/// Resolve signed CFAPI range metadata against the current logical EOF.
+/// CF_EOF is -1; finite over-read is clipped without signed addition.
+fn bounded_file_range(
+    offset: i64,
+    length: i64,
+    file_size: u64,
+) -> windows::core::Result<Range<u64>> {
+    let invalid = || windows::core::Error::from_hresult(windows::Win32::Foundation::E_INVALIDARG);
+    if file_size > i64::MAX as u64 {
+        return Err(invalid());
+    }
+    let start = u64::try_from(offset).map_err(|_| invalid())?;
+    if start >= file_size {
+        return Err(invalid());
+    }
+    let end = if length == -1 {
+        file_size
+    } else {
+        let length = u64::try_from(length).map_err(|_| invalid())?;
+        if length == 0 {
+            return Err(invalid());
+        }
+        start
+            .checked_add(length)
+            .ok_or_else(invalid)?
+            .min(file_size)
+    };
+    if end <= start {
+        return Err(invalid());
+    }
+    Ok(start..end)
+}
+
 impl FetchData {
     /// Whether or not the callback was called from an interrupted hydration.
     pub fn interrupted_hydration(&self) -> bool {
@@ -31,6 +64,12 @@ impl FetchData {
             ..(self.0.RequiredFileOffset + self.0.RequiredLength) as u64
     }
 
+    /// Required bytes intersected with the current logical file size.
+    /// Resolves CF_EOF and finite over-read; malformed or empty ranges fail.
+    pub fn required_file_range_bounded(&self, file_size: u64) -> windows::core::Result<Range<u64>> {
+        bounded_file_range(self.0.RequiredFileOffset, self.0.RequiredLength, file_size)
+    }
+
     /// The amount of bytes that must be written to the placeholder.
     ///
     /// If the sync provider prefer to give data in larger chunks, use this range instead.
@@ -39,6 +78,12 @@ impl FetchData {
     pub fn optional_file_range(&self) -> Range<u64> {
         (self.0.OptionalFileOffset as u64)
             ..(self.0.OptionalFileOffset + self.0.OptionalLength) as u64
+    }
+
+    /// Optional bytes intersected with the current logical file size.
+    /// This hint grants no additional native or file-generation authority.
+    pub fn optional_file_range_bounded(&self, file_size: u64) -> windows::core::Result<Range<u64>> {
+        bounded_file_range(self.0.OptionalFileOffset, self.0.OptionalLength, file_size)
     }
 
     /// The last time the file was dehydrated.
@@ -84,6 +129,81 @@ impl CancelFetchData {
     pub fn file_range(&self) -> Range<u64> {
         let range = unsafe { self.0.Anonymous.FetchData };
         (range.FileOffset as u64)..(range.FileOffset + range.Length) as u64
+    }
+
+    /// Cancelled bytes intersected with the current logical file size.
+    /// A partial cancellation does not cancel bytes outside this range.
+    pub fn file_range_bounded(&self, file_size: u64) -> windows::core::Result<Range<u64>> {
+        let range = unsafe { self.0.Anonymous.FetchData };
+        bounded_file_range(range.FileOffset, range.Length, file_size)
+    }
+}
+
+#[cfg(test)]
+mod bounded_range_tests {
+    use super::*;
+
+    #[test]
+    fn eof_sentinel_and_finite_overread_resolve_to_actual_eof() {
+        assert_eq!(bounded_file_range(0, -1, 83).unwrap(), 0..83);
+        assert_eq!(bounded_file_range(0, 4096, 83).unwrap(), 0..83);
+        assert_eq!(bounded_file_range(17, -1, 83).unwrap(), 17..83);
+        assert_eq!(bounded_file_range(17, 4096, 83).unwrap(), 17..83);
+        assert_eq!(bounded_file_range(17, 2, 83).unwrap(), 17..19);
+    }
+
+    #[test]
+    fn signed_maximum_and_overflowing_signed_sum_do_not_panic() {
+        let size = i64::MAX as u64;
+        assert_eq!(bounded_file_range(0, -1, size).unwrap(), 0..size);
+        assert_eq!(
+            bounded_file_range(i64::MAX - 2, i64::MAX, size).unwrap(),
+            size - 2..size
+        );
+        assert_eq!(
+            bounded_file_range(i64::MAX - 1, 1, size).unwrap(),
+            size - 1..size
+        );
+        assert!(bounded_file_range(0, -1, size + 1).is_err());
+        assert!(bounded_file_range(0, -1, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn malformed_empty_and_wholly_beyond_eof_ranges_refuse() {
+        for (offset, length, size) in [
+            (-1, 1, 83),
+            (0, -2, 83),
+            (0, 0, 83),
+            (83, 1, 83),
+            (84, -1, 83),
+            (0, -1, 0),
+        ] {
+            let error = bounded_file_range(offset, length, size).unwrap_err();
+            assert_eq!(error.code(), windows::Win32::Foundation::E_INVALIDARG);
+        }
+    }
+
+    #[test]
+    fn fetch_accessors_resolve_their_own_original_fields() {
+        let fetch = FetchData(CF_CALLBACK_PARAMETERS_0_1 {
+            RequiredFileOffset: 7,
+            RequiredLength: -1,
+            OptionalFileOffset: 0,
+            OptionalLength: 4096,
+            ..Default::default()
+        });
+        assert_eq!(fetch.required_file_range_bounded(83).unwrap(), 7..83);
+        assert_eq!(fetch.optional_file_range_bounded(83).unwrap(), 0..83);
+    }
+
+    #[test]
+    fn cancellation_accessor_preserves_a_partial_range() {
+        let mut raw = CF_CALLBACK_PARAMETERS_0_0::default();
+        // Locally owned metadata only; no native pointer or operation ticket.
+        raw.Anonymous.FetchData.FileOffset = 7;
+        raw.Anonymous.FetchData.Length = 2;
+        let cancel = CancelFetchData(raw);
+        assert_eq!(cancel.file_range_bounded(83).unwrap(), 7..9);
     }
 }
 

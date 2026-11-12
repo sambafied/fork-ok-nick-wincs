@@ -289,7 +289,7 @@ mod process_identity_tests {
     #[test]
     fn truncated_callback_never_dereferences_process_pointer() {
         // Deliberately unreadable: a truncated callback must reject before use.
-        let mut value = callback(1_usize as *const CF_PROCESS_INFO);
+        let mut value = callback(std::ptr::dangling::<CF_PROCESS_INFO>());
         let end = std::mem::offset_of!(CF_CALLBACK_INFO, ProcessInfo)
             + std::mem::size_of::<*const CF_PROCESS_INFO>();
         for size in [0, end - 1] {
@@ -338,13 +338,14 @@ mod process_identity_tests {
 
     #[test]
     fn snapshot_owns_scalars_and_redacts_debug() {
-        let mut source = Box::new(process(12345, 6789));
-        let request = Request::new(callback(&*source));
-        source.ProcessId = 54321;
-        source.SessionId = 9876;
-        drop(source);
-        let snapshot = request.process_identity().unwrap();
-        drop(request);
+        let snapshot = {
+            let mut source = Box::new(process(12345, 6789));
+            let request = Request::new(callback(&*source));
+            source.ProcessId = 54321;
+            source.SessionId = 9876;
+            drop(source);
+            request.process_identity().unwrap()
+        };
         assert_eq!(snapshot.id(), 12345);
         assert_eq!(snapshot.session_id(), 6789);
         assert_eq!(format!("{snapshot:?}"), "ProcessIdentity { .. }");
